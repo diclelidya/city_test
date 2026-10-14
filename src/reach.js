@@ -206,7 +206,7 @@ function reachedPieces(data, dist, budget) {
 }
 
 // The 25 m band: buffer every reached street piece, then merge them all into one shape.
-function bandAround(pieces, startXY) {
+export function bandAround(pieces, startXY) {
   const params = new BufferParameters()
   params.setQuadrantSegments(8)
   const parts = new ArrayList()
@@ -403,7 +403,7 @@ function walkTo(data, dist, [cx, cy]) {
 }
 
 // jsts geometry -> list of polygons, each a list of rings of [x, y].
-function toPolygons(geom) {
+export function toPolygons(geom) {
   const out = []
   for (let i = 0; i < geom.getNumGeometries(); i++) {
     const p = geom.getGeometryN(i)

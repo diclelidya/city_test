@@ -26,6 +26,9 @@ export const REACH_COLORS = ['#4b2a7b', '#8559bd', '#c4a6e8']
 export const SHOP = '#e0912f'
 export const SHOP_SELECTED = '#c2410c'
 
+// "Walk from yourself": the shortest route dashed near-black, the expected route a strong blue, the misrouted walk pink.
+export const ROUTE_COLORS = { shortest: '#1a1a1a', expected: '#1f5fd6', misrouted: '#e0245e' }
+
 export const GROUND = '#f3f0ea'
 export const STREET = '#8a857c'
 
@@ -37,3 +40,12 @@ export function mix(a, b, t) {
 
 // The ground areas use a lighter tint of each shade, so the highlighted buildings stand out.
 export const AREA_TINTS = REACH_COLORS.map((c) => mix(c, GROUND, 0.35))
+
+// "Walk from yourself": all other buildings fade to a pale grey; buildings within 25 m of a route
+// take its colour, slightly lightened, and a mix of the two where both routes pass.
+export const WALK_PALE = '#e3e1dc'
+export const WALK_TINTS = {
+  expected: mix(ROUTE_COLORS.expected, '#ffffff', 0.15),
+  misrouted: mix(ROUTE_COLORS.misrouted, '#ffffff', 0.15),
+  both: mix(ROUTE_COLORS.expected, ROUTE_COLORS.misrouted, 0.5),
+}

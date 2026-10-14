@@ -1,23 +1,42 @@
 // The 3D city: ground, streets, buildings and the three reach areas.
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Line, Html } from '@react-three/drei'
 import { buildingsGeometry, paintBuildings, streetsGeometry, areaGeometry } from './cityGeometry.js'
-import { useColor, REACH_COLORS, AREA_TINTS, GROUND, STREET, SHOP, SHOP_SELECTED } from './palette.js'
+import {
+  useColor,
+  REACH_COLORS,
+  AREA_TINTS,
+  GROUND,
+  STREET,
+  SHOP,
+  SHOP_SELECTED,
+  ROUTE_COLORS,
+  WALK_PALE,
+  WALK_TINTS,
+} from './palette.js'
 
 // A click that ends a drag (orbiting or panning) is not a pick.
 const isDrag = (e) => e.delta > 4
 
-function Buildings({ city, levels, onPick }) {
+// While a walk is shown, `near` says for each building which routes pass within 25 m:
+// 0 none, 1 the expected route, 2 the misrouted walk, 3 both.
+const NEAR_COLORS = [WALK_PALE, WALK_TINTS.expected, WALK_TINTS.misrouted, WALK_TINTS.both]
+
+function Buildings({ city, levels, near, onPick }) {
   const invalidate = useThree((s) => s.invalidate)
   const merged = useMemo(() => buildingsGeometry(city.buildings), [city])
   useEffect(() => () => merged.geometry.dispose(), [merged])
   useEffect(() => {
     paintBuildings(merged, (i) =>
-      levels && levels[i] >= 0 ? REACH_COLORS[levels[i]] : useColor[city.buildings[i].use] ?? useColor.undefined,
+      near
+        ? NEAR_COLORS[near[i]]
+        : levels && levels[i] >= 0
+          ? REACH_COLORS[levels[i]]
+          : useColor[city.buildings[i].use] ?? useColor.undefined,
     )
     invalidate()
-  }, [merged, levels, city, invalidate])
+  }, [merged, levels, near, city, invalidate])
 
   return (
     <mesh
@@ -77,6 +96,115 @@ function StartMarker({ xy }) {
   )
 }
 
+// "Walk from yourself": a labelled marker for A and B.
+function WalkMarker({ xy, label, color }) {
+  return (
+    <group position={[xy[0], 0, -xy[1]]}>
+      <mesh position-y={25} raycast={() => null}>
+        <cylinderGeometry args={[10, 0.5, 50, 24]} />
+        <meshLambertMaterial color={color} emissive={color} emissiveIntensity={0.3} />
+      </mesh>
+      <Html position={[0, 62, 0]} center className="marker-label" style={{ pointerEvents: 'none' }}>
+        {label}
+      </Html>
+    </group>
+  )
+}
+
+// The expected route and the misrouted walk as translucent 25 m bands on the ground, like the reach
+// areas; where they overlap the colours mix. The dashed near-black shortest route lies on top.
+function RouteBand({ polygons, color, y }) {
+  const geometry = useMemo(() => areaGeometry(polygons), [polygons])
+  useEffect(() => () => geometry.dispose(), [geometry])
+  return (
+    <mesh geometry={geometry} position-y={y} raycast={() => null}>
+      <meshBasicMaterial color={color} transparent opacity={0.32} depthWrite={false} />
+    </mesh>
+  )
+}
+
+function Routes({ routes }) {
+  return (
+    <>
+      <RouteBand polygons={routes.expected.band} color={ROUTE_COLORS.expected} y={0.3} />
+      <RouteBand polygons={routes.misrouted.band} color={ROUTE_COLORS.misrouted} y={0.5} />
+      {/* The exact way along the street centre, on top of each band. */}
+      <Line
+        points={routes.expected.line.map(([x, z]) => [x, 1.8, -z])}
+        color={ROUTE_COLORS.expected}
+        lineWidth={4}
+        raycast={() => null}
+      />
+      <Line
+        points={routes.misrouted.line.map(([x, z]) => [x, 2.2, -z])}
+        color={ROUTE_COLORS.misrouted}
+        lineWidth={4}
+        raycast={() => null}
+      />
+      <Line
+        points={routes.shortest.line.map(([x, z]) => [x, 2.8, -z])}
+        color={ROUTE_COLORS.shortest}
+        lineWidth={2.5}
+        dashed
+        dashSize={8}
+        gapSize={6}
+        raycast={() => null}
+      />
+    </>
+  )
+}
+
+// "Play the day": the misrouted walks of the other hours played, as dotted pink traces, so they don't
+// look like the current route. The more hours share a trace, the thicker and less faint it is.
+// Hovering a trace shows its hours.
+function Traces({ traces }) {
+  const [hover, setHover] = useState(null)
+  return (
+    <>
+      {traces.map((t) => {
+        const share = (t.hours.length - 1) / 23 // 0 for one hour, 1 for all 24
+        const points = t.line.map(([x, z]) => [x, 1.2, -z])
+        const show = (e) => {
+          e.stopPropagation()
+          setHover({ label: t.label, point: e.point.toArray() })
+        }
+        return (
+          <group key={t.key}>
+            <Line
+              points={points}
+              color={ROUTE_COLORS.misrouted}
+              lineWidth={1.5 + 5.5 * share}
+              dashed
+              dashSize={3 + 8 * share}
+              gapSize={6 + 6 * share}
+              transparent
+              opacity={0.3 + 0.6 * share}
+              depthWrite={false}
+              raycast={() => null}
+            />
+            {/* A wider, invisible copy of the trace, so it is easy to point at. */}
+            <Line
+              points={points}
+              lineWidth={14}
+              transparent
+              opacity={0}
+              depthWrite={false}
+              onPointerOver={show}
+              onPointerMove={show}
+              onPointerOut={() => setHover(null)}
+            />
+          </group>
+        )
+      })}
+      {hover && (
+        <Html position={hover.point} className="trace-label" style={{ pointerEvents: 'none' }}>
+          {hover.label}
+        </Html>
+      )}
+    </>
+  )
+}
+
 // A pin above each building with shop space. Clicking a pin selects it in the list.
 function ShopPins({ city, shops, selected, onSelect }) {
   return shops.map((shop) => {
@@ -98,8 +226,16 @@ function ShopPins({ city, shops, selected, onSelect }) {
   })
 }
 
-export default function CityScene({ city, reach, onPick, selectedShop, onSelectShop }) {
+export default function CityScene({ city, reach, walk, onPick, selectedShop, onSelectShop }) {
   const { x0, y0, x1, y1 } = city.bounds
+  const shown = walk?.routes?.routes
+  const near = useMemo(() => {
+    if (!shown) return null
+    const n = new Uint8Array(city.buildings.length)
+    for (const i of shown.expected.alongside) n[i] |= 1
+    for (const i of shown.misrouted.alongside) n[i] |= 2
+    return n
+  }, [shown, city])
   const cx = (x0 + x1) / 2
   const cz = -(y0 + y1) / 2
   return (
@@ -114,11 +250,15 @@ export default function CityScene({ city, reach, onPick, selectedShop, onSelectS
       <directionalLight position={[-600, 1200, 400]} intensity={1.6} />
       <Ground city={city} onPick={onPick} />
       <Streets city={city} />
-      <Buildings city={city} levels={reach?.buildingLevel} onPick={onPick} />
+      <Buildings city={city} levels={reach?.buildingLevel} near={near} onPick={onPick} />
       {reach?.areas?.map((a, level) => (
         <ReachArea key={`${reach.id}-${level}`} polygons={a.polygons} level={level} />
       ))}
       {reach?.start && <StartMarker xy={reach.start} />}
+      {walk?.traces?.length > 0 && <Traces traces={walk.traces} />}
+      {walk?.routes && <Routes key={walk.routes.id} routes={walk.routes.routes} />}
+      {walk?.a && <WalkMarker xy={walk.routes?.start ?? walk.a} label="A" color="#ffffff" />}
+      {walk?.b && <WalkMarker xy={walk.routes?.end ?? walk.b} label="B" color="#1c1c1c" />}
       {reach?.shops && <ShopPins city={city} shops={reach.shops} selected={selectedShop} onSelect={onSelectShop} />}
       <OrbitControls makeDefault target={[cx, 0, cz]} maxPolarAngle={Math.PI / 2.15} minDistance={60} maxDistance={6000} />
     </Canvas>
