@@ -26,8 +26,11 @@ export const REACH_COLORS = ['#4b2a7b', '#8559bd', '#c4a6e8']
 export const SHOP = '#e0912f'
 export const SHOP_SELECTED = '#c2410c'
 
-// "Walk from yourself": the shortest route dashed near-black, the expected route a strong blue, the misrouted walk pink.
-export const ROUTE_COLORS = { shortest: '#1a1a1a', expected: '#1f5fd6', misrouted: '#e0245e' }
+// "Walk from yourself": electric blue belongs only to the misrouted walk and is the strongest thing on
+// the map. The expected route is grey, the shortest route a thin dashed near-black line.
+export const ROUTE_COLORS = { shortest: '#1a1a1a', expected: '#6b6b6b', misrouted: '#1f3bff' }
+// Dark grey for everything else in this mode that used to be blue: bars, slider, swatches.
+export const UI_GREY = '#444444'
 
 export const GROUND = '#f3f0ea'
 export const STREET = '#8a857c'
@@ -41,11 +44,18 @@ export function mix(a, b, t) {
 // The ground areas use a lighter tint of each shade, so the highlighted buildings stand out.
 export const AREA_TINTS = REACH_COLORS.map((c) => mix(c, GROUND, 0.35))
 
-// "Walk from yourself": all other buildings fade to a pale grey; buildings within 25 m of a route
-// take its colour, slightly lightened, and a mix of the two where both routes pass.
-export const WALK_PALE = '#e3e1dc'
-export const WALK_TINTS = {
-  expected: mix(ROUTE_COLORS.expected, '#ffffff', 0.15),
-  misrouted: mix(ROUTE_COLORS.misrouted, '#ffffff', 0.15),
-  both: mix(ROUTE_COLORS.expected, ROUTE_COLORS.misrouted, 0.5),
-}
+// "Walk from yourself": buildings away from the routes fade to a pale grey. Buildings within 25 m of a
+// route become line drawings: edges in the route's tone, with only a very light fill.
+export const WALK_PALE = '#e2e1de'
+export const WALK_FILLS = { expected: '#f4f4f3', misrouted: '#f1f3ff' }
+export const WALK_EDGES = { expected: '#2b2b2b', misrouted: ROUTE_COLORS.misrouted }
+
+// "Show how the city reads you": pale grey for close to you (rank 1) to electric blue for far from you
+// (rank 0). Buildings with no known use get a warm off-white, so they are not read as "close".
+export const READ_CLOSE = '#e4e4e2'
+export const READ_FAR = ROUTE_COLORS.misrouted
+export const READ_MID = mix(READ_CLOSE, READ_FAR, 0.5)
+export const READ_UNKNOWN = '#f3eee2'
+// The scale is prepared once as 101 steps, so recolouring the city every hour stays quick.
+const READ_STEPS = Array.from({ length: 101 }, (_, k) => mix(READ_FAR, READ_CLOSE, k / 100))
+export const readColor = (rank) => (Number.isNaN(rank) ? READ_UNKNOWN : READ_STEPS[Math.round(rank * 100)])

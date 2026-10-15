@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CityScene from './CityScene.jsx'
 import { prepareCity } from './cityGeometry.js'
-import { USE_COLORS, REACH_COLORS, SHOP, ROUTE_COLORS, WALK_TINTS, WALK_PALE } from './palette.js'
+import {
+  USE_COLORS,
+  REACH_COLORS,
+  SHOP,
+  ROUTE_COLORS,
+  WALK_PALE,
+  WALK_FILLS,
+  WALK_EDGES,
+  READ_FAR,
+  READ_MID,
+  READ_CLOSE,
+  READ_UNKNOWN,
+} from './palette.js'
+
+// "Show how the city reads you" is calculated, but its checkbox is hidden until it is tested.
+const SHOW_READING_TOGGLE = false
 import { PROFILES } from './misroute.js'
 
 const FILES = { kit: 'kit.json', buildings: 'buildings.geojson', graph: 'streets.graph.json', zensus: 'zensus.geojson' }
@@ -36,6 +51,8 @@ export default function App() {
   const [time, setTime] = useState({ day: 'weekday', hour: 12 })
   // "Play the day": all 24 hours of the current walk, which hours have been played, and where playback is.
   const [play, setPlay] = useState(null)
+  // "Show how the city reads you": colour every building by its affinity for the current mix.
+  const [reading, setReading] = useState(false)
   const worker = useRef(null)
   const lastId = useRef(0)
   const lastKind = useRef('reach')
@@ -159,6 +176,15 @@ export default function App() {
     return [...byKey.values()].map((t) => ({ ...t, label: hourRanges(t.hours) }))
   }, [play])
 
+  // The same walks as strands, one per hour played, for the footsteps on the map.
+  const strands = useMemo(() => {
+    if (!play?.results) return []
+    return play.played
+      .map((hour) => ({ hour, route: play.results[hour].routes.misrouted }))
+      .filter(({ route }) => !route.sameAsShortest)
+      .map(({ hour, route }) => ({ hour, line: route.line }))
+  }, [play])
+
   const switchMode = (m) => {
     if (m === mode) return
     lastId.current += 1 // an answer for the other mode is no longer wanted
@@ -176,7 +202,7 @@ export default function App() {
         <CityScene
           city={city}
           reach={mode === 'reach' && reach?.areas ? reach : null}
-          walk={mode === 'misroute' ? { a: walk.a, b: walk.b, routes, traces } : null}
+          walk={mode === 'misroute' ? { a: walk.a, b: walk.b, routes, traces, strands, reading } : null}
           onPick={pick}
           selectedShop={selectedShop}
           onSelectShop={setSelectedShop}
@@ -204,6 +230,8 @@ export default function App() {
             play={play}
             traces={traces}
             onPlay={playDay}
+            reading={reading}
+            onReading={setReading}
           />
         ) : (
           <>
@@ -263,18 +291,43 @@ export default function App() {
       </aside>
 
       <aside className="legend">
-        {mode === 'misroute' && routes ? (
+        {mode === 'misroute' && routes && reading ? (
+          <>
+            <h2>How the city reads you</h2>
+            <div
+              className="read-scale"
+              style={{ background: `linear-gradient(90deg, ${READ_CLOSE}, ${READ_MID}, ${READ_FAR})` }}
+            />
+            <div className="read-labels">
+              <span>close to you</span>
+              <span>far from you</span>
+            </div>
+            <ul>
+              <li>
+                <span className="swatch" style={{ background: READ_UNKNOWN }} />
+                use not known
+              </li>
+            </ul>
+            {traces.length > 0 && (
+              <ul className="legend-lines">
+                <li>
+                  <span className="line-swatch footsteps" style={{ '--c': ROUTE_COLORS.misrouted }} />
+                  Misrouted walks at other hours
+                </li>
+              </ul>
+            )}
+          </>
+        ) : mode === 'misroute' && routes ? (
           <>
             <h2>Buildings within 25 m of</h2>
             <ul>
               {[
-                [WALK_TINTS.expected, 'the expected route'],
-                [WALK_TINTS.misrouted, 'the misrouted walk'],
-                [WALK_TINTS.both, 'both'],
-                [WALK_PALE, 'neither'],
-              ].map(([color, label]) => (
+                [WALK_FILLS.misrouted, WALK_EDGES.misrouted, 'the misrouted walk'],
+                [WALK_FILLS.expected, WALK_EDGES.expected, 'the expected route only'],
+                [WALK_PALE, 'rgba(0, 0, 0, 0.12)', 'neither'],
+              ].map(([fill, edge, label]) => (
                 <li key={label}>
-                  <span className="swatch" style={{ background: color }} />
+                  <span className="swatch" style={{ background: fill, borderColor: edge }} />
                   {label}
                 </li>
               ))}
@@ -282,7 +335,7 @@ export default function App() {
             {traces.length > 0 && (
               <ul className="legend-lines">
                 <li>
-                  <span className="line-swatch dotted" style={{ '--c': ROUTE_COLORS.misrouted }} />
+                  <span className="line-swatch footsteps" style={{ '--c': ROUTE_COLORS.misrouted }} />
                   Misrouted walks at other hours
                 </li>
               </ul>
@@ -378,7 +431,7 @@ const ROUTES = [
 const pct = (v) => `${Math.round(v * 100)} %`
 
 // "How far can you walk from yourself?": the profile the city reads, and three routes from A to B.
-function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }) {
+function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, reading, onReading }) {
   const r = walk.result
   const show = r?.routes && !busy
   let text
@@ -398,6 +451,13 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }
       <h1>How far can you walk from yourself?</h1>
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
       <TimeControl time={time} onTime={onTime} play={play} canPlay={!!r?.routes && !busy} onPlay={onPlay} />
+      {SHOW_READING_TOGGLE && (
+        <label className={`reading-toggle${r?.routes ? '' : ' off'}`}>
+          <input type="checkbox" checked={reading} disabled={!r?.routes} onChange={(e) => onReading(e.target.checked)} />
+          Show how the city reads you
+          {!r?.routes && <span className="sub"> · Set A and B first</span>}
+        </label>
+      )}
       {play?.status === 'done' && <DaySummary play={play} traces={traces} />}
       {show && (
         <>
@@ -406,6 +466,14 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }
               The city reads this walk as {article(top[1])} {top[1]} ({pct(r.mix[top[0]])}) {TRIP[r.purpose]}
             </h2>
             <ul className="bars">
+              <li className="bars-head">
+                <span />
+                <span />
+                <span className="num">read</span>
+                <span className="num sharp" title="The sharpened mix used for routing and the distance from yourself">
+                  weighs
+                </span>
+              </li>
               {PROFILES.map(([key, label]) => (
                 <li key={key}>
                   <span className="bar-label">{label}</span>
@@ -413,9 +481,14 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }
                     <span style={{ width: `${r.mix[key] * 100}%` }} />
                   </span>
                   <span className="num">{pct(r.mix[key])}</span>
+                  <span className="num sharp">{pct(r.sharp[key])}</span>
                 </li>
               ))}
             </ul>
+            <p className="close-far">
+              <span>Close to you: {r.closeUses.map((u) => USE_LABEL[u] ?? u).join(', ')}</span>
+              <span>Far from you: {r.farUses.map((u) => USE_LABEL[u] ?? u).join(', ')}</span>
+            </p>
             <p className="sub">
               Purpose: {r.purpose}.{r.atEdge && ' A lies near the edge of the kit, which leans a little towards commuter.'}{' '}
               {r.timeRules.length
@@ -500,8 +573,16 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }
           app, not data. The misrouted walk is chosen by the app too, not by the walker.
         </p>
         <p>
+          <strong>Sharpening.</strong> A mixed profile averages the affinities out: read as 34 % student, a walk
+          still has education near the middle, so "far from you" blurs. For routing and for the distance from
+          yourself, each share is therefore raised to the power 3 and scaled back to 100 %, so the profile the city
+          reads the walk as weighs much more. The bars show the shares as read; the small grey numbers show what
+          each profile weighs after sharpening. "Close to you" and "Far from you" name the three uses the sharpened
+          mix is most and least drawn to, leaving out uses with under 1,000 m² in the whole kit.
+        </p>
+        <p>
           <strong>Distance from yourself.</strong> Each profile has an affinity from 0 to 1 for each building use; the
-          mix uses the share-weighted average. For each route, the buildings within 25 m of it are weighted by floor
+          sharpened mix uses the share-weighted average. For each route, the buildings within 25 m of it are weighted by floor
           area, and the distance is 1 minus their average affinity. For the expected route and the misrouted walk, only
           the streets that leave the shortest route are measured, so the stretches they share don't flatten the
           numbers; the shortest route is measured whole. The expected route prefers streets that rank high
@@ -512,8 +593,16 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay }
         </p>
         <p>
           <strong>Play the day</strong> computes the walk for every hour from 0 to 23 on the chosen weekday or weekend,
-          then plays one hour per second. Each misrouted walk leaves a faint pink trace; walks that use exactly the same
-          streets share one trace, which gets stronger the more hours share it. A new A, B or day clears the traces.
+          then plays one hour per second. Each hour's misrouted walk leaves a strand of faint blue footsteps, shifted a
+          little sideways; where many hours take the same streets the strands pile up into a darker, denser trace.
+          Pointing at a trace shows its hours. A new A, B or day clears the traces.
+        </p>
+        <p>
+          <strong>Show how the city reads you</strong> colours every building by its affinity for the current mix: the
+          affinities of its uses, weighted by floor area, leaving out unknown use. The buildings are ranked from the
+          least to the most suited, so pale grey means closer to you than most buildings in the kit and blue further, not
+          close or far in absolute terms. Buildings of only unknown use are off-white. The colours follow the hour, the day
+          and Play the day.
         </p>
         <p>Walking time at 80 m per minute.</p>
       </div>
@@ -595,7 +684,7 @@ function DaySummary({ play, traces }) {
     <p className="day-summary">
       {text}
       {ways.length > 0 && never.length > 0 && ` At ${hourRanges(never)} it does not stray from the shortest route.`}
-      <span className="sub"> The stronger a trace on the map, the more hours share it.</span>
+      <span className="sub"> The denser a trace of footsteps on the map, the more hours walk it.</span>
     </p>
   )
 }

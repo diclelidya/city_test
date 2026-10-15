@@ -233,7 +233,7 @@ body {
 
 .bars li {
   display: grid;
-  grid-template-columns: 96px 1fr 40px;
+  grid-template-columns: 96px 1fr 34px 34px;
   align-items: center;
   gap: 6px;
   padding: 1px 0;
@@ -249,7 +249,7 @@ body {
 .bar span {
   display: block;
   height: 100%;
-  background: #1f5fd6;
+  background: #444;
 }
 
 .panel .sub {
@@ -289,12 +289,6 @@ body {
   margin-right: 7px;
   border-radius: 2px;
   background: var(--c);
-}
-
-.line-swatch.expected,
-.line-swatch.misrouted {
-  height: 10px;
-  opacity: 0.55;
 }
 
 .line-swatch.shortest {
@@ -339,7 +333,7 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: #e0245e;
+  background: #2b2b2b;
   cursor: pointer;
 }
 
@@ -352,8 +346,8 @@ body {
 .day-summary {
   margin: 0 0 10px;
   padding: 7px 9px;
-  border-left: 3px solid #e0245e;
-  background: #fdf0f4;
+  border-left: 3px solid #1f3bff;
+  background: #f1f3ff;
 }
 
 .modes.small {
@@ -372,7 +366,7 @@ body {
 .time input {
   flex: 1;
   min-width: 0;
-  accent-color: #1f5fd6;
+  accent-color: #444;
 }
 
 .line-swatch.dotted {
@@ -390,8 +384,91 @@ body {
   transform: translate(8px, -50%);
   padding: 1px 6px;
   border-radius: 4px;
-  background: #e0245e;
+  background: #1f3bff;
   color: #fff;
   font: 600 12px system-ui, sans-serif;
   white-space: nowrap;
+}
+
+.reading-toggle {
+  display: block;
+  margin: 0 0 10px;
+  cursor: pointer;
+}
+
+.reading-toggle input {
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  accent-color: #444;
+}
+
+.reading-toggle.off {
+  color: #888;
+  cursor: default;
+}
+
+.read-scale {
+  width: 170px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.read-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 172px;
+  margin: 2px 0 6px;
+  font-size: 11px;
+  color: #555;
+}
+
+.line-swatch.footsteps {
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 6px, var(--c) 6px 12px, transparent 12px 15px);
+  opacity: 0.7;
+}
+
+/* Notes along the misrouted walk: small, quiet, typewriter-like. */
+.route-note {
+  transform: translate(8px, -50%);
+  font: 11px/1.2 'Courier New', Courier, monospace;
+  white-space: nowrap;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 3px #fff,
+    0 0 4px #fff;
+}
+
+.route-note.blue {
+  color: #1f3bff;
+}
+
+.route-note.grey {
+  color: #333;
+}
+
+.route-note.at-b {
+  transform: translate(14px, 10px);
+  font-weight: 700;
+}
+
+/* The sharpened weights next to the bars, small and grey */
+.bars .sharp {
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.bars .bars-head {
+  font-size: 10px;
+  color: #8a8a8a;
+}
+
+.close-far {
+  margin: 4px 0 4px;
+  font-size: 12px;
+}
+
+.close-far span {
+  display: block;
 }

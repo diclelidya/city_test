@@ -18,6 +18,8 @@ const EDGE_M = 150 // A this close to the edge of the kit counts as "arriving fr
 const MAX_DETOUR = 2 // the misrouted walk is at most twice the shortest route
 const AVOID = 2 // the streets of the shortest and expected routes cost this much more for the misrouted walk
 const STRENGTHS = [3, 2, 1, 0.5] // how strongly affinity changes a street's cost, tried in turn
+const SHARPEN = 3 // for routing and distance, each profile share is raised to this power, then scaled back to 100 %
+const MIN_USE_M2 = 1000 // uses with less floor area in the whole kit are left out of "close to you" and "far from you"
 
 // How much each profile is drawn to each use, from 0 (not at all) to 1 (strongly).
 // `undefined` is left out on purpose: unknown floor area counts for nothing.
@@ -157,7 +159,12 @@ export function prepareMisroute(data, files) {
     return near
   })
 
-  return { floorAreas, zensus, bounds: { x0, y0, x1, y1 }, edgeBuildings }
+  // Uses with enough floor area in the kit to name as "close to you" or "far from you".
+  const total = {}
+  for (const fa of floorAreas) for (const [u, m2] of Object.entries(fa)) total[u] = (total[u] ?? 0) + m2
+  const namedUses = KNOWN_USES.filter((u) => (total[u] ?? 0) >= MIN_USE_M2)
+
+  return { floorAreas, zensus, bounds: { x0, y0, x1, y1 }, edgeBuildings, namedUses }
 }
 
 // --- the profile --------------------------------------------------------------------------
@@ -228,6 +235,13 @@ function purposeOf(near) {
     if (PURPOSE_OF[use]) byPurpose[PURPOSE_OF[use]] = (byPurpose[PURPOSE_OF[use]] ?? 0) + m2
   const best = Object.entries(byPurpose).sort((a, b) => b[1] - a[1])[0]
   return best ? best[0] : 'home or a visit'
+}
+
+// A mixed profile averages the affinities out, so "far from you" blurs: with 34 % student, education
+// still ends near the middle. For routing and the distance from yourself, the mix is sharpened towards
+// the profile the city reads the walk as: each share is raised to the power 3 and scaled back to 100 %.
+function sharpen(mix) {
+  return normalise(Object.fromEntries(Object.entries(mix).map(([k, v]) => [k, v ** SHARPEN])))
 }
 
 // The mix's affinity for each use: the share-weighted average of the five profiles.
@@ -367,6 +381,80 @@ function rankStreets(scores) {
   return rank
 }
 
+// "Show how the city reads you": every building's affinity for the mix, as a rank from 0 (the
+// least suited building in the kit) to 1 (the most suited); equal values share a rank.
+// Buildings with no known use get NaN.
+function rankBuildings(prep, aff) {
+  const values = prep.floorAreas.map((_, i) => readBuildings(prep, [i], aff).affinity)
+  const order = values.map((a, i) => [a, i]).filter(([a]) => a != null).sort((x, y) => x[0] - y[0])
+  const rank = new Float32Array(values.length).fill(NaN)
+  const last = order.length - 1
+  for (let start = 0; start <= last; ) {
+    let end = start
+    while (end < last && order[end + 1][0] === order[start][0]) end++
+    const r = last > 0 ? (start + end) / 2 / last : 0.5
+    for (let k = start; k <= end; k++) rank[order[k][1]] = r
+    start = end + 1
+  }
+  return rank
+}
+
+// A few quiet notes along the misrouted walk: where it leaves the expected route, what it mainly
+// passes on its longest own stretch, where it rejoins (if before B), and at B what straying cost.
+function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, shortest) {
+  const expected = new Set(expectedPath)
+  // Runs of consecutive streets that are not on the expected route, with where each starts and ends.
+  const runs = []
+  let at = startNode
+  for (const ei of misPath) {
+    const e = data.edges[ei]
+    const next = e.a === at ? e.b : e.a
+    if (!expected.has(ei)) {
+      const last = runs[runs.length - 1]
+      if (last && last.to === at) {
+        last.edges.push(ei)
+        last.to = next
+        last.length += e.length
+      } else runs.push({ from: at, to: next, edges: [ei], length: e.length })
+    }
+    at = next
+  }
+  const notes = []
+  const B = at
+  if (runs.length && !misrouted.sameAsShortest) {
+    notes.push({ xy: data.nodes[runs[0].from].xy, text: 'leaves the expected way', tone: 'blue' })
+    // The longest own stretch: its two main uses, at its middle.
+    const longest = runs.reduce((a, b) => (b.length > a.length ? b : a))
+    const near = new Set(longest.edges.flatMap((ei) => prep.edgeBuildings[ei]))
+    const byUse = {}
+    for (const i of near)
+      for (const [use, m2] of Object.entries(prep.floorAreas[i])) if (use !== 'undefined') byUse[use] = (byUse[use] ?? 0) + m2
+    const uses = Object.entries(byUse)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([u]) => u.replace(/_/g, ' '))
+    let walked = 0
+    const mid = longest.edges.find((ei) => (walked += data.edges[ei].length) >= longest.length / 2)
+    const pts = data.edges[mid].pts
+    if (uses.length) notes.push({ xy: pts[Math.floor(pts.length / 2)], text: uses.join(' · '), tone: 'blue' })
+    const lastRun = runs[runs.length - 1]
+    if (lastRun.to !== B) notes.push({ xy: data.nodes[lastRun.to].xy, text: 'rejoins', tone: 'blue' })
+  }
+  const extra = Math.round((misrouted.length - shortest.length) / WALK_M_PER_MIN)
+  const far = misrouted.distance == null ? '' : ` · ${Math.round(misrouted.distance * 100)} % from yourself`
+  const atB = {
+    xy: data.nodes[B].xy,
+    text: misrouted.sameAsShortest ? 'does not stray' : `+${extra} min${far}`,
+    tone: 'grey',
+    atB: true,
+  }
+  // Keep the notes few and apart: leave out any that would sit within 100 m of B or of a note before it.
+  const kept = []
+  for (const n of notes)
+    if ([atB, ...kept].every((o) => Math.hypot(o.xy[0] - n.xy[0], o.xy[1] - n.xy[1]) > 100)) kept.push(n)
+  return [...kept, atB]
+}
+
 // --- everything for one pair of clicks ----------------------------------------------------
 
 export function snap(data, xy) {
@@ -391,7 +479,9 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   const fromA = profileFromStart(nearA, census, atEdge)
   const fromAB = updateWithDestination(fromA, nearB)
   const { mix, rules: timeRules } = shiftByTime(fromAB, time)
-  const aff = mixAffinity(mix)
+  const sharp = sharpen(mix)
+  const aff = mixAffinity(sharp)
+  const byAffinity = [...prep.namedUses].sort((a, b) => aff[b] - aff[a])
 
   // How suited each street is to the mix, as a rank from 0 to 1.
   const streetAff = rankStreets(prep.edgeBuildings.map((idx) => readBuildings(prep, idx, aff).affinity))
@@ -406,12 +496,14 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   // routes where it can, but no more than twice as long.
   const avoid = new Set([...shortestPath, ...expectedPath])
   let misrouted = null
+  let misPath = shortestPath
   let strength = null
   for (const k of STRENGTHS) {
     const path = cheapestPath(data, A.node, B.node, (ei) => len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1))
     const route = describeRoute(data, prep, A.node, path, aff, shared)
     if (route.length <= MAX_DETOUR * shortest.length + 0.01) {
       misrouted = route
+      misPath = path
       strength = k
       break
     }
@@ -435,7 +527,12 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
     time,
     timeRules,
     mix,
+    sharp,
+    closeUses: byAffinity.slice(0, 3),
+    farUses: byAffinity.slice(-3).reverse(),
     purpose: purposeOf(nearB),
+    buildingRank: rankBuildings(prep, aff),
+    notes: routeNotes(data, prep, A.node, misPath, expectedPath, misrouted, shortest),
     routes: {
       shortest,
       expected,
