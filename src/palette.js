@@ -50,12 +50,20 @@ export const WALK_PALE = '#e2e1de'
 export const WALK_FILLS = { expected: '#f4f4f3', misrouted: '#f1f3ff' }
 export const WALK_EDGES = { expected: '#2b2b2b', misrouted: ROUTE_COLORS.misrouted }
 
-// "Show how the city reads you": pale grey for close to you (rank 1) to electric blue for far from you
-// (rank 0). Buildings with no known use get a warm off-white, so they are not read as "close".
-export const READ_CLOSE = '#e4e4e2'
-export const READ_FAR = ROUTE_COLORS.misrouted
+// "Show how the city reads you": a greyscale, no blue. Very pale warm grey for close to you (rank 1),
+// dark grey for far from you (rank 0). Buildings with no known use are white with a thin grey outline.
+export const READ_CLOSE = '#f1ede6'
+// Not darker than this: at 70 % opacity the darkest buildings must stay lighter than the grey
+// expected-route line, so it remains readable over them.
+export const READ_FAR = '#5c5c5c'
 export const READ_MID = mix(READ_CLOSE, READ_FAR, 0.5)
-export const READ_UNKNOWN = '#f3eee2'
+export const READ_UNKNOWN = '#ffffff'
+export const READ_UNKNOWN_EDGE = '#a9a9a9'
 // The scale is prepared once as 101 steps, so recolouring the city every hour stays quick.
 const READ_STEPS = Array.from({ length: 101 }, (_, k) => mix(READ_FAR, READ_CLOSE, k / 100))
+// Opacity shows how awake a building is at this hour: 15 % when quiet, up to 70 % when fully active.
+export const READ_QUIET_OPACITY = 0.15
+export const WALK_OPACITY = 0.7
+export const readOpacity = (activity) =>
+  Number.isNaN(activity) ? WALK_OPACITY : READ_QUIET_OPACITY + (WALK_OPACITY - READ_QUIET_OPACITY) * activity
 export const readColor = (rank) => (Number.isNaN(rank) ? READ_UNKNOWN : READ_STEPS[Math.round(rank * 100)])

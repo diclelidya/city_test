@@ -58,11 +58,13 @@ export function buildingsGeometry(buildings) {
   const geometry = mergeGeometries(parts, false)
   parts.forEach((g) => g.dispose())
   layFlat(geometry)
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(offset * 3), 3))
+  // Colour and opacity per vertex (r, g, b, a), so single buildings can fade.
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(offset * 4).fill(1), 4))
   return { geometry, ranges }
 }
 
-export function paintBuildings({ geometry, ranges }, colorOf) {
+// `opacityOf` (optional) gives each building's opacity; without it, every building is fully opaque.
+export function paintBuildings({ geometry, ranges }, colorOf, opacityOf = null) {
   const attr = geometry.attributes.color
   const out = attr.array
   // Each colour is read once and reused, and written straight into the array: quick enough to
@@ -72,10 +74,12 @@ export function paintBuildings({ geometry, ranges }, colorOf) {
     const key = colorOf(i)
     let c = cache.get(key)
     if (!c) cache.set(key, (c = new THREE.Color(key)))
-    for (let v = start * 3, end = (start + count) * 3; v < end; v += 3) {
+    const a = opacityOf ? opacityOf(i) : 1
+    for (let v = start * 4, end = (start + count) * 4; v < end; v += 4) {
       out[v] = c.r
       out[v + 1] = c.g
       out[v + 2] = c.b
+      out[v + 3] = a
     }
   })
   attr.needsUpdate = true

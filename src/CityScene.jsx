@@ -17,6 +17,10 @@ import {
   WALK_FILLS,
   WALK_EDGES,
   readColor,
+  readOpacity,
+  READ_UNKNOWN,
+  READ_UNKNOWN_EDGE,
+  WALK_OPACITY,
 } from './palette.js'
 
 // A click that ends a drag (orbiting or panning) is not a pick.
@@ -26,11 +30,12 @@ const isDrag = (e) => e.delta > 4
 // 0 none, 1 the expected route, 2 the misrouted walk, 3 both (drawn as the misrouted walk).
 const NEAR_COLORS = [WALK_PALE, WALK_FILLS.expected, WALK_FILLS.misrouted, WALK_FILLS.misrouted]
 
-// `paint`, when given, is a colour for every building and wins over everything else.
-// With `ghost` (once A and B are set), the buildings are drawn at 70 % opacity. A first, invisible pass
-// writes only their depth, so only the nearest wall of each building is blended over what lies behind:
-// this avoids the flickering of overlapping see-through walls.
-function Buildings({ city, levels, near, paint, ghost, onPick }) {
+// `paint`, when given, is a colour for every building and wins over everything else; `fade` an opacity.
+// With `ghost` (once A and B are set), the buildings are drawn at 70 % opacity, or at `fade`. A first,
+// invisible pass writes only their depth, so only the nearest wall of each building is blended over what
+// lies behind: this avoids the flickering of overlapping see-through walls. Buildings fainter than 40 %
+// skip that pass, so the buildings behind them still show through.
+function Buildings({ city, levels, near, paint, fade, ghost, onPick }) {
   const invalidate = useThree((s) => s.invalidate)
   const merged = useMemo(() => buildingsGeometry(city.buildings), [city])
   useEffect(() => () => merged.geometry.dispose(), [merged])
@@ -43,15 +48,24 @@ function Buildings({ city, levels, near, paint, ghost, onPick }) {
         : levels && levels[i] >= 0
           ? REACH_COLORS[levels[i]]
           : useColor[city.buildings[i].use] ?? useColor.undefined,
+      ghost ? (i) => (fade ? fade[i] : WALK_OPACITY) : null,
     )
     invalidate()
-  }, [merged, levels, near, paint, city, invalidate])
+  }, [merged, levels, near, paint, fade, ghost, city, invalidate])
 
   return (
     <>
       {ghost && (
         <mesh geometry={merged.geometry} renderOrder={2} raycast={() => null}>
-          <meshBasicMaterial colorWrite={false} transparent polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
+          <meshBasicMaterial
+            vertexColors
+            alphaTest={0.4}
+            colorWrite={false}
+            transparent
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+          />
         </mesh>
       )}
       <mesh
@@ -71,7 +85,6 @@ function Buildings({ city, levels, near, paint, ghost, onPick }) {
           polygonOffsetFactor={1}
           polygonOffsetUnits={1}
           transparent={ghost}
-          opacity={ghost ? 0.7 : 1}
           depthWrite={!ghost}
         />
       </mesh>
@@ -161,7 +174,7 @@ function RouteLine({ line, color, y, width, order, outline, ...style }) {
   const onTop = { depthTest: false, depthWrite: false, transparent: true, raycast: () => null }
   return (
     <>
-      {outline && <Line points={under} color="#ffffff" lineWidth={width + 4} renderOrder={order - 0.5} {...onTop} />}
+      {outline && <Line points={under} color="#ffffff" lineWidth={width + 3} renderOrder={order - 0.5} {...onTop} />}
       <Line points={points} color={color} lineWidth={width} renderOrder={order} {...onTop} {...style} />
     </>
   )
@@ -178,7 +191,7 @@ function BuildingOutlines({ city, indices, color }) {
   )
 }
 
-function Routes({ city, routes, outline }) {
+function Routes({ city, routes, outline, unknown }) {
   const { expected, misrouted, shortest } = routes
   // A building near both routes is drawn in the misrouted walk's blue.
   const expectedOnly = useMemo(() => {
@@ -189,6 +202,9 @@ function Routes({ city, routes, outline }) {
     <>
       <BuildingOutlines key={`eo${expected.key}|${misrouted.key}`} city={city} indices={expectedOnly} color={WALK_EDGES.expected} />
       <BuildingOutlines key={`mo${misrouted.key}`} city={city} indices={misrouted.alongside} color={WALK_EDGES.misrouted} />
+      {unknown && (
+        <BuildingOutlines key={`uo${expected.key}|${misrouted.key}`} city={city} indices={unknown} color={READ_UNKNOWN_EDGE} />
+      )}
       <RouteBand key={`eb${expected.key}`} polygons={expected.band} color={ROUTE_COLORS.expected} opacity={0.2} y={0.3} />
       <RouteBand key={`mb${misrouted.key}`} polygons={misrouted.band} color={ROUTE_COLORS.misrouted} opacity={0.14} y={0.5} />
       <RouteLine key={`el${expected.key}`} line={expected.line} color={ROUTE_COLORS.expected} width={3} y={1.8} order={10} outline={outline} />
@@ -200,6 +216,7 @@ function Routes({ city, routes, outline }) {
         width={1.8}
         y={2.8}
         order={12}
+        outline={outline}
         dashed
         dashSize={7}
         gapSize={6}
@@ -342,9 +359,27 @@ export default function CityScene({ city, reach, walk, onPick, selectedShop, onS
     for (const i of shown.misrouted.alongside) n[i] |= 2
     return n
   }, [shown, city])
-  // "Show how the city reads you": every building by its rank for the current mix.
+  // "Show how the city reads you": every building away from the routes by its rank for the current mix
+  // (greys) and its activity at this hour (opacity); the line-drawn route buildings stay as they are.
   const ranks = walk?.reading ? walk?.routes?.buildingRank : null
-  const paint = useMemo(() => ranks && Array.from(ranks, readColor), [ranks])
+  const awake = walk?.reading ? walk?.routes?.buildingActivity : null
+  const paint = useMemo(
+    () =>
+      ranks &&
+      Array.from(ranks, (rank, i) =>
+        near[i] ? NEAR_COLORS[near[i]] : Number.isNaN(rank) ? READ_UNKNOWN : readColor(rank),
+      ),
+    [ranks, near],
+  )
+  const fade = useMemo(
+    () => awake && Float32Array.from(awake, (a, i) => (near[i] ? WALK_OPACITY : readOpacity(a))),
+    [awake, near],
+  )
+  // Buildings with no known use and no route outline get a thin grey outline.
+  const unknown = useMemo(
+    () => ranks && Array.from(ranks.keys()).filter((i) => Number.isNaN(ranks[i]) && !near[i]),
+    [ranks, near],
+  )
   const cx = (x0 + x1) / 2
   const cz = -(y0 + y1) / 2
   return (
@@ -359,14 +394,14 @@ export default function CityScene({ city, reach, walk, onPick, selectedShop, onS
       <directionalLight position={[-600, 1200, 400]} intensity={1.6} />
       <Ground city={city} onPick={onPick} />
       <Streets city={city} />
-      <Buildings city={city} levels={reach?.buildingLevel} near={near} paint={paint} ghost={!!shown} onPick={onPick} />
+      <Buildings city={city} levels={reach?.buildingLevel} near={near} paint={paint} fade={fade} ghost={!!shown} onPick={onPick} />
       {reach?.areas?.map((a, level) => (
         <ReachArea key={`${reach.id}-${level}`} polygons={a.polygons} level={level} />
       ))}
       {reach?.start && <StartMarker xy={reach.start} />}
       {walk?.strands?.length > 0 && <Footsteps strands={walk.strands} />}
       {walk?.traces?.length > 0 && <TraceHover traces={walk.traces} />}
-      {walk?.routes && <Routes city={city} routes={walk.routes.routes} outline={!!paint} />}
+      {walk?.routes && <Routes city={city} routes={walk.routes.routes} outline={!!paint} unknown={unknown} />}
       {walk?.routes?.notes && <RouteNotes notes={walk.routes.notes} />}
       {walk?.a && <WalkMarker xy={walk.routes?.start ?? walk.a} label="A" color="#ffffff" />}
       {walk?.b && <WalkMarker xy={walk.routes?.end ?? walk.b} label="B" color="#1c1c1c" />}

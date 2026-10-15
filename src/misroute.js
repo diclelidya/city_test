@@ -424,6 +424,22 @@ function rankStreets(scores) {
   return rank
 }
 
+// "Show how the city reads you": how awake each building is at this hour, from the rhythm table,
+// weighted by the floor area of its known uses. Only shown, never used in a calculation. NaN when
+// the building has no known use.
+function buildingActivity(prep, activity) {
+  return Float32Array.from(prep.floorAreas, (fa) => {
+    let sum = 0
+    let m2s = 0
+    for (const [use, m2] of Object.entries(fa))
+      if (use in activity) {
+        sum += m2 * activity[use]
+        m2s += m2
+      }
+    return m2s ? sum / m2s : NaN
+  })
+}
+
 // "Show how the city reads you": every building's affinity for the mix, as a rank from 0 (the
 // least suited building in the kit) to 1 (the most suited); equal values share a rank.
 // Buildings with no known use get NaN.
@@ -595,6 +611,7 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
     farUses: byAffinity.slice(-3).reverse(),
     purpose: purposeOf(nearB),
     buildingRank: rankBuildings(prep, aff),
+    buildingActivity: buildingActivity(prep, now.activity),
     notes: routeNotes(data, prep, A.node, misPath, expectedPath, misrouted, shortest),
     routes: {
       shortest,

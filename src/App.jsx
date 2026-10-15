@@ -13,10 +13,12 @@ import {
   READ_MID,
   READ_CLOSE,
   READ_UNKNOWN,
+  READ_UNKNOWN_EDGE,
+  READ_QUIET_OPACITY,
 } from './palette.js'
 
-// "Show how the city reads you" is calculated, but its checkbox is hidden until it is tested.
-const SHOW_READING_TOGGLE = false
+// "Show how the city reads you": its checkbox can be hidden here.
+const SHOW_READING_TOGGLE = true
 import { PROFILES } from './misroute.js'
 
 const FILES = { kit: 'kit.json', buildings: 'buildings.geojson', graph: 'streets.graph.json', zensus: 'zensus.geojson' }
@@ -327,7 +329,11 @@ export default function App() {
             </div>
             <ul>
               <li>
-                <span className="swatch" style={{ background: READ_UNKNOWN }} />
+                <span className="swatch" style={{ background: READ_MID, opacity: READ_QUIET_OPACITY / 0.7 }} />
+                quiet at this hour
+              </li>
+              <li>
+                <span className="swatch" style={{ background: READ_UNKNOWN, borderColor: READ_UNKNOWN_EDGE }} />
                 use not known
               </li>
             </ul>
@@ -649,11 +655,10 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
           Pointing at a trace shows its hours. A new A, B or day clears the traces.
         </p>
         <p>
-          <strong>Show how the city reads you</strong> colours every building by its affinity for the current mix: the
-          affinities of its uses, weighted by floor area, leaving out unknown use. The buildings are ranked from the
-          least to the most suited, so pale grey means closer to you than most buildings in the kit and blue further, not
-          close or far in absolute terms. Buildings of only unknown use are off-white. The colours follow the hour, the day
-          and Play the day.
+          <strong>Show how the city reads you</strong> greys every building away from the routes by its affinity
+          for the sharpened mix, ranked across all buildings: pale for close to you, dark for far from you, relative
+          to the rest of the kit. Its opacity shows how active it is at this hour from the rhythm table: faint means
+          quiet. This is only shown; the routes and the distance from yourself are measured as before.
         </p>
         <p>Walking time at 80 m per minute.</p>
       </div>
