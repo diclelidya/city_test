@@ -472,3 +472,25 @@ body {
 .close-far span {
   display: block;
 }
+
+.time .memory {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: #444;
+  cursor: pointer;
+}
+
+.time .memory input {
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  accent-color: #444;
+}
+
+.time label.memory {
+  display: block;
+}
+
+.time .memory input {
+  flex: none;
+  min-width: auto;
+}

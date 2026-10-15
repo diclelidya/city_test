@@ -53,6 +53,12 @@ export default function App() {
   const [play, setPlay] = useState(null)
   // "Show how the city reads you": colour every building by its affinity for the current mix.
   const [reading, setReading] = useState(false)
+  // "Remember earlier hours": while playing the day, each hour avoids the streets earlier hours strayed along.
+  const [memory, setMemory] = useState(false)
+  const changeMemory = (m) => {
+    setMemory(m)
+    if (play) setPlay(null) // the played day was computed with the other setting
+  }
   const worker = useRef(null)
   const lastId = useRef(0)
   const lastKind = useRef('reach')
@@ -76,7 +82,16 @@ export default function App() {
         } else if (lastKind.current === 'misrouteDay') {
           // All 24 hours are ready: start playing them.
           if (msg.result.error) setPlay(null)
-          else setPlay((p) => p && { ...p, status: 'playing', results: msg.result.map((r, h) => ({ id: `${msg.id}-${h}`, ...r })) })
+          else
+            setPlay(
+              (p) =>
+                p && {
+                  ...p,
+                  status: 'playing',
+                  plainWays: msg.result.plainWays,
+                  results: msg.result.hours.map((r, h) => ({ id: `${msg.id}-${h}`, ...r })),
+                },
+            )
         } else setWalk((w) => ({ ...w, result: { id: msg.id, ...msg.result } }))
         setBusy(false)
       }
@@ -138,8 +153,8 @@ export default function App() {
     lastId.current += 1
     lastKind.current = 'misrouteDay'
     setBusy(false)
-    setPlay({ status: 'preparing', day: time.day, next: 0, played: [], savedHour: time.hour, results: null })
-    worker.current.postMessage({ type: 'misrouteDay', id: lastId.current, a: walk.a, b: walk.b, day: time.day })
+    setPlay({ status: 'preparing', day: time.day, memory, next: 0, played: [], savedHour: time.hour, results: null })
+    worker.current.postMessage({ type: 'misrouteDay', id: lastId.current, a: walk.a, b: walk.b, day: time.day, memory })
   }
 
   // One hour per second. After hour 23, go back to the hour that was set before playing.
@@ -163,17 +178,22 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [play])
 
-  // The misrouted walks of the hours played, one trace per distinct way, with the hours that share it.
-  const traces = useMemo(() => {
-    if (!play?.results) return []
+  // The ways the played hours strayed (walks sharing at least 80 % of their length are one way), and
+  // one trace per exact walk for pointing at on the map, labelled with the hours of its way.
+  const [ways, traces] = useMemo(() => {
+    if (!play?.results) return [[], []]
+    const byWay = new Map()
     const byKey = new Map()
     for (const h of play.played) {
-      const m = play.results[h].routes.misrouted
-      if (m.sameAsShortest) continue
-      if (!byKey.has(m.key)) byKey.set(m.key, { key: m.key, line: m.line, hours: [] })
-      byKey.get(m.key).hours.push(h)
+      const r = play.results[h]
+      if (r.way == null) continue
+      if (!byWay.has(r.way)) byWay.set(r.way, { way: r.way, hours: [] })
+      byWay.get(r.way).hours.push(h)
+      const m = r.routes.misrouted
+      if (!byKey.has(m.key)) byKey.set(m.key, { key: m.key, line: m.line, way: r.way })
     }
-    return [...byKey.values()].map((t) => ({ ...t, label: hourRanges(t.hours) }))
+    const label = (way) => hourRanges(byWay.get(way).hours)
+    return [[...byWay.values()], [...byKey.values()].map((t) => ({ ...t, label: label(t.way) }))]
   }, [play])
 
   // The same walks as strands, one per hour played, for the footsteps on the map.
@@ -229,7 +249,10 @@ export default function App() {
             onTime={changeTime}
             play={play}
             traces={traces}
+            ways={ways}
             onPlay={playDay}
+            memory={memory}
+            onMemory={changeMemory}
             reading={reading}
             onReading={setReading}
           />
@@ -431,7 +454,7 @@ const ROUTES = [
 const pct = (v) => `${Math.round(v * 100)} %`
 
 // "How far can you walk from yourself?": the profile the city reads, and three routes from A to B.
-function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, reading, onReading }) {
+function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, onPlay, reading, onReading, memory, onMemory }) {
   const r = walk.result
   const show = r?.routes && !busy
   let text
@@ -450,7 +473,15 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, 
     <>
       <h1>How far can you walk from yourself?</h1>
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
-      <TimeControl time={time} onTime={onTime} play={play} canPlay={!!r?.routes && !busy} onPlay={onPlay} />
+      <TimeControl
+        time={time}
+        onTime={onTime}
+        play={play}
+        canPlay={!!r?.routes && !busy}
+        onPlay={onPlay}
+        memory={memory}
+        onMemory={onMemory}
+      />
       {SHOW_READING_TOGGLE && (
         <label className={`reading-toggle${r?.routes ? '' : ' off'}`}>
           <input type="checkbox" checked={reading} disabled={!r?.routes} onChange={(e) => onReading(e.target.checked)} />
@@ -458,7 +489,7 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, 
           {!r?.routes && <span className="sub"> · Set A and B first</span>}
         </label>
       )}
-      {play?.status === 'done' && <DaySummary play={play} traces={traces} />}
+      {play?.status === 'done' && <DaySummary play={play} ways={ways} />}
       {show && (
         <>
           <section className="reading">
@@ -494,6 +525,10 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, 
               {r.timeRules.length
                 ? `Time: ${r.timeRules.map((t) => `${t.label}, ${shiftText(t.shift)}`).join('; ')}.`
                 : 'Time: no shift at this hour.'}
+            </p>
+            <p className="sub">
+              Rhythm: {r.timeBand}.{' '}
+              {r.quietUses.length ? `Quiet now: ${r.quietUses.join('; ')}.` : 'Nothing is quiet now.'}
             </p>
           </section>
           <ol className="routes">
@@ -592,6 +627,22 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, onPlay, 
           mixed uses, so the routes often differ by only a few points, and for short walks often not at all.
         </p>
         <p>
+          <strong>The city's rhythm.</strong> Each use has an activity from 0 to 1 for six time bands, on a weekday
+          and at the weekend: shops and services busy in the day, offices and education on weekday working hours,
+          food and drink at lunch and in the evening, entertainment in the evening and at night, homes and
+          accommodation at every hour. In a street's score, a use's floor area counts only as much as it is active,
+          so the streets, and with them the routes, change with the hour. The rhythm changes which streets are
+          chosen, not how they are measured: the distance from yourself and "passes mainly" use plain floor area.
+          The activity table is an assumption, like the affinities.
+        </p>
+        <p>
+          <strong>Remember earlier hours.</strong> With this on, Play the day walks the hours in order, and each hour's
+          misrouted walk avoids the streets the earlier hours' misrouted walks took: a street costs once more for each
+          earlier hour that strayed along it. Straying that repeats becomes a routine, so the next hour strays somewhere
+          else; the routes then change because of the past, not only because of the hour. The limit of twice the
+          shortest route still holds; where nothing fits, memory is dropped for that hour and the summary says so.
+        </p>
+        <p>
           <strong>Play the day</strong> computes the walk for every hour from 0 to 23 on the chosen weekday or weekend,
           then plays one hour per second. Each hour's misrouted walk leaves a strand of faint blue footsteps, shifted a
           little sideways; where many hours take the same streets the strands pile up into a darker, denser trace.
@@ -614,7 +665,7 @@ const PROFILE_LABEL = Object.fromEntries(PROFILES)
 const shiftText = (shift) => Object.entries(shift).map(([k, f]) => `${PROFILE_LABEL[k]} ×${f}`).join(', ')
 
 // Weekday or weekend, and the hour of the walk.
-function TimeControl({ time, onTime, play, canPlay, onPlay }) {
+function TimeControl({ time, onTime, play, canPlay, onPlay, memory, onMemory }) {
   const status = play?.status
   const label =
     status === 'preparing'
@@ -635,9 +686,13 @@ function TimeControl({ time, onTime, play, canPlay, onPlay }) {
           </button>
         ))}
       </div>
-      <button className="play" disabled={!canPlay && !play?.results || status === 'preparing'} onClick={onPlay}>
+      <button className="play" disabled={(!canPlay && !play?.results) || status === 'preparing'} onClick={onPlay}>
         {label}
       </button>
+      <label className="memory">
+        <input type="checkbox" checked={memory} onChange={(e) => onMemory(e.target.checked)} disabled={status === 'preparing'} />
+        Remember earlier hours
+      </label>
       <label>
         <span>{String(time.hour).padStart(2, '0')}:00</span>
         <input
@@ -667,24 +722,34 @@ function hourRanges(hours) {
 }
 
 // After playing the day: how many different ways the walk strays, and at which hours.
-function DaySummary({ play, traces }) {
-  const ways = [...traces].sort((a, b) => b.hours.length - a.hours.length)
+function DaySummary({ play, ways: found }) {
+  const ways = [...found].sort((a, b) => b.hours.length - a.hours.length)
   const straying = new Set(ways.flatMap((w) => w.hours))
   const never = play.played.filter((h) => !straying.has(h))
   const dayName = play.day === 'weekday' ? 'weekday' : 'weekend day'
+  const withMemory = play.memory ? ` with memory (${play.plainWays} without)` : ''
+  // The four ways taken most often by name, the rest counted.
+  const named = ways.slice(0, 4)
+  const rest = ways.length - named.length
   let text
   if (!ways.length) text = `Across the ${dayName}, this walk never strays from the shortest route.`
   else if (ways.length === 1)
-    text = `Across the ${dayName}, this walk strays in one way, at ${never.length ? `hours ${hourRanges(ways[0].hours)}` : 'every hour'}.`
+    text = `Across the ${dayName}, this walk strays in one way${withMemory}, at ${never.length ? `hours ${hourRanges(ways[0].hours)}` : 'every hour'}.`
   else
-    text = `Across the ${dayName}, this walk strays in ${ways.length} different ways: ${ways
+    text = `Across the ${dayName}, this walk strays in ${ways.length} different ways${withMemory}: ${named
       .map((w) => `${hourRanges(w.hours)} (${w.hours.length} ${w.hours.length === 1 ? 'hour' : 'hours'})`)
-      .join(' · ')}.`
+      .join(' · ')}${rest ? ` · and ${rest} more` : ''}.`
+  const dropped = play.memory ? play.played.filter((h) => play.results[h].memoryDropped) : []
   return (
     <p className="day-summary">
       {text}
       {ways.length > 0 && never.length > 0 && ` At ${hourRanges(never)} it does not stray from the shortest route.`}
-      <span className="sub"> The denser a trace of footsteps on the map, the more hours walk it.</span>
+      {dropped.length > 0 && ` At ${hourRanges(dropped)} memory was dropped to stay within twice the shortest route.`}
+      <span className="sub">
+        {' '}
+        Walks that share at least 80 % of their length count as one way. The denser a trace of footsteps on the map,
+        the more hours walk it.
+      </span>
     </p>
   )
 }

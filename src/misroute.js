@@ -76,6 +76,46 @@ function shiftByTime(mix, { day, hour }) {
   return { rules: rules.map(({ label, shift }) => ({ label, shift })), mix: normalise(shifted) }
 }
 
+// The city's rhythm: how active each use is in each time band, from 0 (quiet) to 1 (busy), on a weekday
+// and at the weekend. Uses that behave alike share a row. Like the affinities, this is an assumption.
+export const TIME_BANDS = [
+  [0, 6],
+  [6, 10],
+  [10, 14],
+  [14, 18],
+  [18, 22],
+  [22, 24],
+]
+export const ACTIVITY = [
+  // [label, uses, weekday bands 0–6 … 22–24, weekend bands]
+  ['homes, accommodation', ['residential', 'accommodation'], [1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1]],
+  ['shops, services', ['retail', 'service'], [0, 0.4, 1, 1, 0.5, 0], [0, 0.2, 0.7, 0.6, 0.2, 0]],
+  ['offices, education, civic', ['office', 'education', 'civic', 'light_industrial'], [0, 0.7, 1, 0.9, 0.2, 0], [0, 0, 0.1, 0.1, 0, 0]],
+  ['food and drink', ['food_and_drink'], [0, 0.4, 1, 0.6, 1, 0.4], [0, 0.4, 1, 0.7, 1, 0.6]],
+  ['entertainment', ['entertainment'], [0.3, 0, 0.2, 0.3, 0.9, 1], [0.6, 0, 0.3, 0.5, 1, 1]],
+  ['culture', ['culture'], [0, 0.1, 0.8, 0.8, 0.7, 0.1], [0, 0.2, 1, 1, 0.7, 0.1]],
+  ['health', ['health'], [0.2, 0.8, 1, 0.8, 0.3, 0.2], [0.2, 0.3, 0.4, 0.4, 0.3, 0.2]],
+  ['sport', ['sport'], [0, 0.4, 0.4, 0.6, 1, 0.2], [0, 0.5, 1, 1, 0.6, 0.1]],
+  ['transport', ['transport'], [0.3, 1, 0.7, 0.9, 0.7, 0.4], [0.2, 0.5, 0.7, 0.7, 0.6, 0.4]],
+]
+const QUIET = 0.2 // a group at or below this activity is named as quiet on the panel
+
+const bandOf = (hour) => TIME_BANDS.findIndex(([from, to]) => hour >= from && hour < to)
+
+// Activity of every use at this time, and the groups that are quiet then.
+function rhythm({ day, hour }) {
+  const band = bandOf(hour)
+  const activity = {}
+  const quiet = []
+  for (const [label, uses, weekday, weekend] of ACTIVITY) {
+    const a = (day === 'weekend' ? weekend : weekday)[band]
+    for (const u of uses) activity[u] = a
+    if (a <= QUIET) quiet.push(label)
+  }
+  const [from, to] = TIME_BANDS[band]
+  return { activity, quiet, band: `${day} ${from}–${to}` }
+}
+
 // The purpose of the trip, from the uses near B.
 const PURPOSE_OF = {
   retail: 'shopping',
@@ -254,7 +294,9 @@ function mixAffinity(mix) {
 // --- routes -------------------------------------------------------------------------------
 
 // Floor-area-weighted affinity of a set of buildings, with what it covers. null when nothing is known.
-function readBuildings(prep, indices, aff) {
+// With `activity`, each use's floor area counts only as much as the use is active at this hour
+// (used for street scores only; the distance from yourself and "passes mainly" use plain floor area).
+function readBuildings(prep, indices, aff, activity = null) {
   let weighted = 0
   let known = 0
   let unknown = 0
@@ -265,8 +307,9 @@ function readBuildings(prep, indices, aff) {
         unknown += m2
         continue
       }
-      weighted += m2 * aff[use]
-      known += m2
+      const w = activity ? m2 * activity[use] : m2
+      weighted += w * aff[use]
+      known += w
       byUse[use] = (byUse[use] ?? 0) + m2
     }
   return { affinity: known ? weighted / known : null, known, unknown, byUse }
@@ -463,7 +506,8 @@ export function snap(data, xy) {
   return { node, xy: data.nodes[node].xy, snapDistance: distance }
 }
 
-export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', hour: 12 }) {
+// `memory` (optional): how many earlier hours of a played day took each street, by street index.
+export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', hour: 12 }, memory = null) {
   const A = snap(data, xyA)
   const B = snap(data, xyB)
   if (A.error || B.error) return { error: 'tooFar', which: A.error ? 'A' : 'B' }
@@ -484,7 +528,9 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   const byAffinity = [...prep.namedUses].sort((a, b) => aff[b] - aff[a])
 
   // How suited each street is to the mix, as a rank from 0 to 1.
-  const streetAff = rankStreets(prep.edgeBuildings.map((idx) => readBuildings(prep, idx, aff).affinity))
+  // The city's rhythm: uses that are quiet at this hour count less in a street's score.
+  const now = rhythm(time)
+  const streetAff = rankStreets(prep.edgeBuildings.map((idx) => readBuildings(prep, idx, aff, now.activity).affinity))
   const len = (ei) => data.edges[ei].length
 
   const shortestPath = cheapestPath(data, A.node, B.node, len)
@@ -495,18 +541,31 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   // The misrouted walk: prefer streets the profile is least drawn to, and leave the shortest and expected
   // routes where it can, but no more than twice as long.
   const avoid = new Set([...shortestPath, ...expectedPath])
+  // With memory, every street costs once more for each earlier hour whose misrouted walk took it; the
+  // memory is softened together with the strength. If nothing fits even then, memory is dropped.
   let misrouted = null
   let misPath = shortestPath
   let strength = null
-  for (const k of STRENGTHS) {
-    const path = cheapestPath(data, A.node, B.node, (ei) => len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1))
-    const route = describeRoute(data, prep, A.node, path, aff, shared)
-    if (route.length <= MAX_DETOUR * shortest.length + 0.01) {
-      misrouted = route
-      misPath = path
-      strength = k
-      break
+  let memoryDropped = false
+  for (const remember of memory ? [true, false] : [false]) {
+    for (const k of STRENGTHS) {
+      const recall = remember ? k / STRENGTHS[0] : 0
+      const path = cheapestPath(
+        data,
+        A.node,
+        B.node,
+        (ei) => len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1) * (1 + recall * (memory?.[ei] ?? 0)),
+      )
+      const route = describeRoute(data, prep, A.node, path, aff, shared)
+      if (route.length <= MAX_DETOUR * shortest.length + 0.01) {
+        misrouted = route
+        misPath = path
+        strength = k
+        break
+      }
     }
+    if (misrouted) break
+    if (memory) memoryDropped = true
   }
   const fellBack = !misrouted
   if (fellBack) misrouted = describeRoute(data, prep, A.node, shortestPath, aff, shared)
@@ -526,6 +585,10 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
     fromAB,
     time,
     timeRules,
+    timeBand: now.band,
+    quietUses: now.quiet,
+    memoryDropped: memory ? memoryDropped : undefined,
+    misPath,
     mix,
     sharp,
     closeUses: byAffinity.slice(0, 3),
@@ -544,6 +607,42 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
 }
 
 // "Play the day": the same walk at every hour from 0 to 23, on a weekday or at the weekend.
-export function computeMisrouteDay(data, prep, xyA, xyB, day) {
-  return Array.from({ length: 24 }, (_, hour) => computeMisroute(data, prep, xyA, xyB, { day, hour }))
+// With `memory`, the hours are walked in order and each hour's misrouted walk avoids the streets the
+// earlier hours' misrouted walks took, more strongly the more often they were taken.
+export function computeMisrouteDay(data, prep, xyA, xyB, day, { memory = false } = {}) {
+  const taken = memory ? new Float32Array(data.edges.length) : null
+  const hours = Array.from({ length: 24 }, (_, hour) => {
+    const r = computeMisroute(data, prep, xyA, xyB, { day, hour }, taken)
+    if (taken && !r.error && !r.routes.misrouted.sameAsShortest) for (const ei of r.misPath) taken[ei] += 1
+    return r
+  })
+  groupWays(data, hours)
+  return hours
 }
+
+// Two misrouted walks count as the same way when they share at least 80 % of their length,
+// measured against the longer of the two. Each straying hour gets `way`: the number of its way,
+// counted from the way taken at the most hours. Hours that do not stray get none.
+const SAME_WAY = 0.8
+function groupWays(data, hours) {
+  const byKey = new Map()
+  for (const r of hours) {
+    if (r.error || r.routes.misrouted.sameAsShortest) continue
+    if (!byKey.has(r.routes.misrouted.key)) byKey.set(r.routes.misrouted.key, [])
+    byKey.get(r.routes.misrouted.key).push(r)
+  }
+  const ways = []
+  for (const same of [...byKey.values()].sort((a, b) => b.length - a.length)) {
+    const path = same[0].misPath
+    const length = path.reduce((sum, ei) => sum + data.edges[ei].length, 0)
+    const way = ways.find((w) => {
+      const shared = path.reduce((sum, ei) => sum + (w.streets.has(ei) ? data.edges[ei].length : 0), 0)
+      return shared / Math.max(length, w.length) >= SAME_WAY
+    })
+    const id = way ? way.id : ways.push({ id: ways.length, streets: new Set(path), length }) - 1
+    for (const r of same) r.way = id
+  }
+}
+
+// How many different ways a day's misrouted walks take (hours that do not stray are not counted).
+export const waysOf = (hours) => new Set(hours.filter((r) => r.way != null).map((r) => r.way)).size
