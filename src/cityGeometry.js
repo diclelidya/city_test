@@ -101,8 +101,9 @@ export function areaGeometry(polygons) {
 
 // "Walk from yourself": the outlines of some buildings as line segments, for a line drawing:
 // the base, the roof edge, and the wall corners (only where the wall turns, so round buildings
-// don't fill up with vertical lines).
-export function outlineGeometry(buildings, indices) {
+// don't fill up with vertical lines). Without `base`, the outline on the ground is left out: a third
+// fewer lines, for drawing the whole city.
+export function outlineGeometry(buildings, indices, { base = true } = {}) {
   const pos = []
   const add = (ax, ay, ah, bx, by, bh) => pos.push(ax, ah, -ay, bx, bh, -by)
   for (const i of indices) {
@@ -112,7 +113,7 @@ export function outlineGeometry(buildings, indices) {
       for (let k = 0; k < n; k++) {
         const [ax, ay] = r[k]
         const [bx, by] = r[k + 1]
-        add(ax, ay, 0.05, bx, by, 0.05)
+        if (base) add(ax, ay, 0.05, bx, by, 0.05)
         add(ax, ay, h, bx, by, h)
         const [px, py] = r[(k - 1 + n) % n]
         const turn = Math.abs(Math.atan2((ax - px) * (by - ay) - (ay - py) * (bx - ax), (ax - px) * (bx - ax) + (ay - py) * (by - ay)))

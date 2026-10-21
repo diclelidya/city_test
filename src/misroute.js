@@ -2,7 +2,7 @@
 // route them the way that profile is expected to walk, then misroute them the other way,
 // and measure how far each route is from the profile.
 // All the weights below are assumptions, written to be read, not data.
-import { nearestWalkableNode, MAX_SNAP_M, WALK_M_PER_MIN, bandAround, toPolygons } from './reach.js'
+import { nearestWalkableNode, MAX_SNAP_M, WALK_M_PER_MIN } from './reach.js'
 
 export const PROFILES = [
   ['visitor', 'visitor'],
@@ -458,17 +458,26 @@ function rankBuildings(prep, aff) {
   return rank
 }
 
-// A few quiet notes along the misrouted walk: where it leaves the expected route, what it mainly
-// passes on its longest own stretch, where it rejoins (if before B), and at B what straying cost.
-function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, shortest) {
-  const expected = new Set(expectedPath)
-  // Runs of consecutive streets that are not on the expected route, with where each starts and ends.
+// The misrouted walk street by street, in walking order, as { line, far } with `far` from 0 (the street
+// closest to the profile) to 1 (the furthest).
+function routeSegments(data, startNode, path, streetFar) {
+  let at = startNode
+  return path.map((ei) => {
+    const e = data.edges[ei]
+    const line = e.a === at ? e.pts : [...e.pts].reverse()
+    at = e.a === at ? e.b : e.a
+    return { line, far: streetFar[ei] }
+  })
+}
+
+// Runs of consecutive streets of `path` that are not in `other`, with where each starts and ends.
+function ownRuns(data, startNode, path, other) {
   const runs = []
   let at = startNode
-  for (const ei of misPath) {
+  for (const ei of path) {
     const e = data.edges[ei]
     const next = e.a === at ? e.b : e.a
-    if (!expected.has(ei)) {
+    if (!other.has(ei)) {
       const last = runs[runs.length - 1]
       if (last && last.to === at) {
         last.edges.push(ei)
@@ -478,11 +487,25 @@ function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, sho
     }
     at = next
   }
+  return { runs, end: at }
+}
+
+// The point halfway along a run of streets.
+function runMiddle(data, run) {
+  let walked = 0
+  const mid = run.edges.find((ei) => (walked += data.edges[ei].length) >= run.length / 2)
+  const pts = data.edges[mid].pts
+  return pts[Math.floor(pts.length / 2)]
+}
+
+// A few quiet notes along the misrouted walk: where it leaves the expected route, what it mainly
+// passes on its longest own stretch, where it rejoins (if before B), and at B what straying cost.
+function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, expected, shortest) {
+  const { runs, end: B } = ownRuns(data, startNode, misPath, new Set(expectedPath))
   const notes = []
-  const B = at
   if (runs.length && !misrouted.sameAsShortest) {
     notes.push({ xy: data.nodes[runs[0].from].xy, text: 'leaves the expected way', tone: 'blue' })
-    // The longest own stretch: its two main uses, at its middle.
+    // The longest own stretch: the walk's name and its two main uses, at its middle.
     const longest = runs.reduce((a, b) => (b.length > a.length ? b : a))
     const near = new Set(longest.edges.flatMap((ei) => prep.edgeBuildings[ei]))
     const byUse = {}
@@ -492,12 +515,17 @@ function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, sho
       .sort((a, b) => b[1] - a[1])
       .slice(0, 2)
       .map(([u]) => u.replace(/_/g, ' '))
-    let walked = 0
-    const mid = longest.edges.find((ei) => (walked += data.edges[ei].length) >= longest.length / 2)
-    const pts = data.edges[mid].pts
-    if (uses.length) notes.push({ xy: pts[Math.floor(pts.length / 2)], text: uses.join(' · '), tone: 'blue' })
+    notes.push({ xy: runMiddle(data, longest), text: 'misrouted walk', sub: uses.join(' · '), tone: 'blue' })
     const lastRun = runs[runs.length - 1]
     if (lastRun.to !== B) notes.push({ xy: data.nodes[lastRun.to].xy, text: 'rejoins', tone: 'blue' })
+  }
+  // The expected route's name, halfway along its longest stretch away from the misrouted walk.
+  if (!expected.sameAsShortest) {
+    const own = ownRuns(data, startNode, expectedPath, new Set(misPath)).runs
+    if (own.length) {
+      const longest = own.reduce((a, b) => (b.length > a.length ? b : a))
+      notes.push({ xy: runMiddle(data, longest), text: 'expected route', tone: 'grey' })
+    }
   }
   const extra = Math.round((misrouted.length - shortest.length) / WALK_M_PER_MIN)
   const far = misrouted.distance == null ? '' : ` · ${Math.round(misrouted.distance * 100)} % from yourself`
@@ -508,8 +536,11 @@ function routeNotes(data, prep, startNode, misPath, expectedPath, misrouted, sho
     atB: true,
   }
   // Keep the notes few and apart: leave out any that would sit within 100 m of B or of a note before it.
+  // The two route names come first, so they are the last to be left out.
+  const NAME_FIRST = ['misrouted walk', 'expected route']
+  const rank = (n) => (NAME_FIRST.includes(n.text) ? NAME_FIRST.indexOf(n.text) : NAME_FIRST.length)
   const kept = []
-  for (const n of notes)
+  for (const n of [...notes].sort((a, b) => rank(a) - rank(b)))
     if ([atB, ...kept].every((o) => Math.hypot(o.xy[0] - n.xy[0], o.xy[1] - n.xy[1]) > 100)) kept.push(n)
   return [...kept, atB]
 }
@@ -587,8 +618,10 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   if (fellBack) misrouted = describeRoute(data, prep, A.node, shortestPath, aff, shared)
   const expected = describeRoute(data, prep, A.node, expectedPath, aff, shared)
 
-  // The 25 m bands on the ground, as for the walking reach.
-  for (const route of [expected, misrouted]) route.band = toPolygons(bandAround([route.line], A.xy))
+  // For drawing only: how far each street of the misrouted walk lies from the mix, so its line can be
+  // thicker on streets far from the profile. Ranked on plain floor area, like the distance from yourself.
+  const streetFar = rankStreets(prep.edgeBuildings.map((idx) => readBuildings(prep, idx, aff).affinity)).map((r) => 1 - r)
+  misrouted.segments = routeSegments(data, A.node, misPath, streetFar)
 
   return {
     start: A.xy,
@@ -612,7 +645,7 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
     purpose: purposeOf(nearB),
     buildingRank: rankBuildings(prep, aff),
     buildingActivity: buildingActivity(prep, now.activity),
-    notes: routeNotes(data, prep, A.node, misPath, expectedPath, misrouted, shortest),
+    notes: routeNotes(data, prep, A.node, misPath, expectedPath, misrouted, expected, shortest),
     routes: {
       shortest,
       expected,

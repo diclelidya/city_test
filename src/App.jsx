@@ -6,9 +6,8 @@ import {
   REACH_COLORS,
   SHOP,
   ROUTE_COLORS,
-  WALK_PALE,
-  WALK_FILLS,
   WALK_EDGES,
+  DARK,
   READ_FAR,
   READ_MID,
   READ_CLOSE,
@@ -47,7 +46,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [reach, setReach] = useState(null)
   const [selectedShop, setSelectedShop] = useState(null)
-  const [mode, setMode] = useState('reach')
+  // The app opens in "Walk from yourself", drawn dark; the walking reach keeps its light look.
+  const [mode, setMode] = useState('misroute')
   // The second mode: start A, destination B, and the routes between them.
   const [walk, setWalk] = useState({ a: null, b: null, result: null })
   const [time, setTime] = useState({ day: 'weekday', hour: 12 })
@@ -219,7 +219,7 @@ export default function App() {
   const routes = walk.result?.routes ? walk.result : null
 
   return (
-    <div className="app">
+    <div className={`app${mode === 'misroute' ? ' dark' : ''}`}>
       {city ? (
         <CityScene
           city={city}
@@ -316,60 +316,8 @@ export default function App() {
       </aside>
 
       <aside className="legend">
-        {mode === 'misroute' && routes && reading ? (
-          <>
-            <h2>How the city reads you</h2>
-            <div
-              className="read-scale"
-              style={{ background: `linear-gradient(90deg, ${READ_CLOSE}, ${READ_MID}, ${READ_FAR})` }}
-            />
-            <div className="read-labels">
-              <span>close to you</span>
-              <span>far from you</span>
-            </div>
-            <ul>
-              <li>
-                <span className="swatch" style={{ background: READ_MID, opacity: READ_QUIET_OPACITY / 0.7 }} />
-                quiet at this hour
-              </li>
-              <li>
-                <span className="swatch" style={{ background: READ_UNKNOWN, borderColor: READ_UNKNOWN_EDGE }} />
-                use not known
-              </li>
-            </ul>
-            {traces.length > 0 && (
-              <ul className="legend-lines">
-                <li>
-                  <span className="line-swatch footsteps" style={{ '--c': ROUTE_COLORS.misrouted }} />
-                  Misrouted walks at other hours
-                </li>
-              </ul>
-            )}
-          </>
-        ) : mode === 'misroute' && routes ? (
-          <>
-            <h2>Buildings within 25 m of</h2>
-            <ul>
-              {[
-                [WALK_FILLS.misrouted, WALK_EDGES.misrouted, 'the misrouted walk'],
-                [WALK_FILLS.expected, WALK_EDGES.expected, 'the expected route only'],
-                [WALK_PALE, 'rgba(0, 0, 0, 0.12)', 'neither'],
-              ].map(([fill, edge, label]) => (
-                <li key={label}>
-                  <span className="swatch" style={{ background: fill, borderColor: edge }} />
-                  {label}
-                </li>
-              ))}
-            </ul>
-            {traces.length > 0 && (
-              <ul className="legend-lines">
-                <li>
-                  <span className="line-swatch footsteps" style={{ '--c': ROUTE_COLORS.misrouted }} />
-                  Misrouted walks at other hours
-                </li>
-              </ul>
-            )}
-          </>
+        {mode === 'misroute' ? (
+          <WalkLegend routes={routes} reading={reading} traces={traces} />
         ) : (
           <>
             <h2>Main use of building</h2>
@@ -478,6 +426,7 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
   return (
     <>
       <h1>How far can you walk from yourself?</h1>
+      {show && <WalkStats routes={r.routes} />}
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
       <TimeControl
         time={time}
@@ -590,7 +539,8 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
           )}
         </>
       )}
-      <div className="method">
+      <details className="method">
+        <summary>How it works</summary>
         <p>
           <strong>How the profile is guessed.</strong> The app looks at the floor area per use of the buildings within
           100 m of A, and at the census cell of A (average age, rent). Flats point to local residents, and to older
@@ -655,13 +605,118 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
           Pointing at a trace shows its hours. A new A, B or day clears the traces.
         </p>
         <p>
-          <strong>Show how the city reads you</strong> greys every building away from the routes by its affinity
-          for the sharpened mix, ranked across all buildings: pale for close to you, dark for far from you, relative
-          to the rest of the kit. Its opacity shows how active it is at this hour from the rhythm table: faint means
-          quiet. This is only shown; the routes and the distance from yourself are measured as before.
+          <strong>The 25 m rule.</strong> A building belongs to a street, and so to a route, when it lies within
+          25 m of it. Those buildings give each street its score and each route its distance from yourself, and on
+          the map they get brighter edges: light grey along the expected route, blue along the misrouted walk.
+        </p>
+        <p>
+          <strong>The width of the misrouted walk</strong> follows each street's distance from yourself: all streets
+          in the kit are ranked by the plain affinity of their buildings within 25 m, and the line is thicker on
+          streets far from the profile and thinner on close ones, in five steps. Streets without buildings of known
+          use sit in the middle.
+        </p>
+        <p>
+          <strong>Show how the city reads you</strong> shades every building away from the routes by its affinity
+          for the sharpened mix, ranked across all buildings: close to you blends into the dark, far from you is
+          lighter, relative to the rest of the kit. Its opacity shows how active it is at this hour from the rhythm
+          table: faint means quiet. This is only shown; the routes and the distance from yourself are measured as
+          before.
         </p>
         <p>Walking time at 80 m per minute.</p>
+      </details>
+    </>
+  )
+}
+
+// The stat card at the top of the panel: how far the misrouted walk takes you from yourself, against the
+// expected route, and what straying costs in minutes over the shortest route.
+function WalkStats({ routes }) {
+  const { misrouted, expected, shortest } = routes
+  const reading = (route) => (route.sameAsShortest ? 'same as shortest' : route.distance == null ? 'no reading' : pct(route.distance))
+  const extra = Math.round((misrouted.length - shortest.length) / 80)
+  return (
+    <section className="stat-card">
+      <div className="stat-title">Misrouted walk</div>
+      <div className="stats">
+        <div className="stat main">
+          <span className="stat-value">{reading(misrouted)}</span>
+          <span className="stat-label">from yourself</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{reading(expected)}</span>
+          <span className="stat-label">expected route</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{misrouted.sameAsShortest ? '±0' : `+${extra}`} min</span>
+          <span className="stat-label">over the shortest</span>
+        </div>
       </div>
+    </section>
+  )
+}
+
+// The small legend of the dark "Walk from yourself" view.
+function WalkLegend({ routes, reading, traces }) {
+  return (
+    <>
+      <ul className="legend-lines">
+        <li>
+          <span className="line-swatch misrouted" style={{ '--c': ROUTE_COLORS.misrouted }} />
+          Misrouted walk
+        </li>
+        <li className="legend-note">
+          <span className="width-swatch" style={{ '--c': ROUTE_COLORS.misrouted }} />
+          thicker = further from yourself
+        </li>
+        <li>
+          <span className="line-swatch expected" style={{ '--c': ROUTE_COLORS.expected }} />
+          Expected route
+        </li>
+        <li>
+          <span className="line-swatch shortest" style={{ '--c': ROUTE_COLORS.shortest }} />
+          Shortest route
+        </li>
+        {traces.length > 0 && (
+          <li>
+            <span className="line-swatch footsteps" style={{ '--c': ROUTE_COLORS.misrouted }} />
+            Misrouted walks at other hours
+          </li>
+        )}
+      </ul>
+      {routes && (
+        <ul className="legend-lines">
+          <li>
+            <span className="swatch" style={{ background: DARK.fill, borderColor: WALK_EDGES.misrouted }} />
+            within 25 m of the misrouted walk
+          </li>
+          <li>
+            <span className="swatch" style={{ background: DARK.fill, borderColor: WALK_EDGES.expected }} />
+            within 25 m of the expected route
+          </li>
+        </ul>
+      )}
+      {routes && reading && (
+        <div className="legend-lines">
+          <div
+            className="read-scale"
+            style={{ background: `linear-gradient(90deg, ${READ_CLOSE}, ${READ_MID}, ${READ_FAR})` }}
+          />
+          <div className="read-labels">
+            <span>close to you</span>
+            <span>far from you</span>
+          </div>
+          <ul>
+            <li>
+              <span className="swatch" style={{ background: READ_MID, opacity: READ_QUIET_OPACITY + 0.15 }} />
+              quiet at this hour
+            </li>
+            <li>
+              <span className="swatch" style={{ background: READ_UNKNOWN, borderColor: READ_UNKNOWN_EDGE }} />
+              use not known
+            </li>
+          </ul>
+        </div>
+      )}
     </>
   )
 }

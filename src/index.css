@@ -291,11 +291,6 @@ body {
   background: var(--c);
 }
 
-.line-swatch.shortest {
-  height: 2px;
-  background: repeating-linear-gradient(90deg, var(--c) 0 5px, transparent 5px 8px);
-}
-
 .distance {
   margin-left: auto;
   font-weight: 600;
@@ -304,15 +299,6 @@ body {
 
 .distance .sub {
   font-weight: 400;
-}
-
-.marker-label {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: #1c1c1c;
-  color: #fff;
-  font: 600 12px system-ui, sans-serif;
-  white-space: nowrap;
 }
 
 /* Weekday or weekend, and the hour */
@@ -367,11 +353,6 @@ body {
   flex: 1;
   min-width: 0;
   accent-color: #444;
-}
-
-.line-swatch.dotted {
-  height: 3px;
-  background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 6px);
 }
 
 .legend-lines {
@@ -429,30 +410,6 @@ body {
   opacity: 0.7;
 }
 
-/* Notes along the misrouted walk: small, quiet, typewriter-like. */
-.route-note {
-  transform: translate(8px, -50%);
-  font: 11px/1.2 'Courier New', Courier, monospace;
-  white-space: nowrap;
-  text-shadow:
-    0 0 2px #fff,
-    0 0 3px #fff,
-    0 0 4px #fff;
-}
-
-.route-note.blue {
-  color: #1f3bff;
-}
-
-.route-note.grey {
-  color: #333;
-}
-
-.route-note.at-b {
-  transform: translate(14px, 10px);
-  font-weight: 700;
-}
-
 /* The sharpened weights next to the bars, small and grey */
 .bars .sharp {
   font-size: 11px;
@@ -493,4 +450,361 @@ body {
 .time .memory input {
   flex: none;
   min-width: auto;
+}
+
+/* ------------------------------------------------------------------------------------------------
+   "Walk from yourself": a dark city in lines. Everything below applies only in that mode; the
+   walking reach keeps its light look.
+   ------------------------------------------------------------------------------------------------ */
+.app.dark {
+  --bg: #08090b;
+  --card: rgba(16, 18, 22, 0.92);
+  --card-2: rgba(255, 255, 255, 0.035);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #e4e6ea;
+  --muted: #8b9099;
+  --blue: #3d6bff;
+  --blue-text: #7f9bff;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app.dark .panel,
+.app.dark .legend {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  color: var(--text);
+}
+
+.app.dark .panel h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app.dark .panel .sub,
+.app.dark .method,
+.app.dark .bars .sharp,
+.app.dark .bars .bars-head,
+.app.dark .read-labels,
+.app.dark .time .memory {
+  color: var(--muted);
+}
+
+.app.dark .status.warn,
+.app.dark .panel .sub.warn {
+  color: #f0a86a;
+}
+
+.app.dark .modes {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.app.dark .modes button {
+  color: var(--muted);
+}
+
+.app.dark .modes button.on {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.app.dark .time .play {
+  background: var(--blue);
+}
+
+.app.dark .time .play:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.app.dark .time input,
+.app.dark .reading-toggle input,
+.app.dark .time .memory input {
+  accent-color: #aeb3bb;
+}
+
+.app.dark .reading-toggle.off {
+  color: #5d626b;
+}
+
+.app.dark .bar {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.app.dark .bar span {
+  background: #aeb3bb;
+}
+
+.app.dark .reading,
+.app.dark .routes,
+.app.dark .day-summary {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.app.dark .routes li {
+  border-bottom: 1px solid var(--border);
+}
+
+.app.dark .routes li:last-child {
+  border-bottom: 0;
+}
+
+.app.dark .day-summary {
+  border-left: 2px solid var(--blue);
+}
+
+.app.dark .attribution {
+  background: rgba(8, 9, 11, 0.85);
+  color: #7a7f88;
+}
+
+.app.dark .swatch {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.app.dark .legend-lines {
+  border-top: 1px solid var(--border);
+}
+
+.app.dark .legend .legend-lines:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 0;
+}
+
+.app.dark .legend {
+  font-size: 11px;
+  padding: 10px 12px;
+}
+
+.app.dark .legend li {
+  padding: 1px 0;
+}
+
+.app.dark .legend .legend-note {
+  color: var(--muted);
+}
+
+.app.dark .read-scale {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* The stat card at the top of the panel */
+.stat-card {
+  margin: 4px 0 10px;
+  padding: 10px 12px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stat-title {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px;
+  border-left: 1px solid var(--border);
+}
+
+.stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.stat-value {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stat.main .stat-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--blue-text);
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* "How it works", closed by default */
+details.method {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #eee);
+}
+
+details.method summary {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Line swatches of the three routes, in the panel and the legend */
+.line-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 3px;
+  margin-right: 8px;
+  border-radius: 2px;
+  vertical-align: 3px;
+  background: var(--c);
+}
+
+.line-swatch.misrouted {
+  height: 3px;
+  background: #dfe6ff;
+  box-shadow:
+    0 0 0 1.5px var(--c),
+    0 0 7px 2px var(--c);
+}
+
+.line-swatch.expected {
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--c) 0 5px, transparent 5px 8px);
+}
+
+.line-swatch.shortest {
+  height: 1.5px;
+  opacity: 0.8;
+  background: repeating-linear-gradient(90deg, var(--c) 0 1.5px, transparent 1.5px 5px);
+}
+
+.line-swatch.footsteps {
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 6px, var(--c) 6px 12px, transparent 12px 15px);
+  opacity: 0.7;
+}
+
+/* A wedge: thin on the left, thick on the right */
+.width-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 7px;
+  margin-right: 8px;
+  vertical-align: 0;
+  background: var(--c);
+  clip-path: polygon(0 45%, 100% 0, 100% 100%, 0 55%);
+}
+
+/* Labels along the routes: small uppercase sans-serif, a dot on the route, a short leader line and a
+   dark backing. */
+.route-label {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.label-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.label-leader {
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.label-text {
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: rgba(8, 9, 11, 0.82);
+  font: 600 10px/1.25 system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.label-sub {
+  display: block;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: #9aa0aa;
+}
+
+.route-label.blue {
+  color: #7f9bff;
+}
+
+.route-label.grey {
+  color: #c3c7ce;
+}
+
+.route-label.at-b .label-text {
+  color: #e4e6ea;
+  border: 1px solid rgba(127, 155, 255, 0.35);
+}
+
+/* A and B: round blue pins with the letter inside, standing on their point */
+.walk-pin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pin-head {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #3d6bff;
+  border: 2px solid #dfe6ff;
+  color: #fff;
+  font: 700 11px system-ui, sans-serif;
+  box-shadow: 0 0 12px rgba(61, 107, 255, 0.8);
+}
+
+.pin-head::after {
+  content: '';
+  position: absolute;
+  top: 24px;
+  width: 2px;
+  height: 9px;
+  background: #dfe6ff;
+}
+
+.pin-dot {
+  margin-top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #dfe6ff;
+  box-shadow: 0 0 8px #3d6bff;
+}
+
+.trace-label {
+  background: #3d6bff;
 }
