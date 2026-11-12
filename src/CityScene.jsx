@@ -266,11 +266,12 @@ function RouteNotes({ notes, routes, place }) {
     })
     if (changed) setFlipped(next)
   })
-  // The label text is drawn a moment after the label appears: render once more to measure it.
+  // The label text is drawn a moment after the label appears: render once more to measure it. After the
+  // window is resized, render once more too, so a label cut at the new right edge flips at once.
   useEffect(() => {
     const id = requestAnimationFrame(() => invalidate())
     return () => cancelAnimationFrame(id)
-  }, [notes, routes, place, invalidate])
+  }, [notes, routes, place, invalidate, size.width, size.height])
   const { misrouted } = routes
   return notes.map((n, i) => {
     const flip = !!flipped[key(n, i)]

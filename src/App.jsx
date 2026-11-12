@@ -637,16 +637,18 @@ function WalkStats({ routes, noNewWalk, firstDistance, takenCount }) {
   const { misrouted, expected } = routes
   const reading = (route) => (route.sameAsShortest ? 'same as shortest' : route.distance == null ? 'no reading' : pct(route.distance))
   const extra = extraMinutes(routes)
+  // Words instead of a number ("same as shortest") are set smaller and may wrap, so they stay in the card.
+  const valueClass = (route) => `stat-value${route.sameAsShortest || route.distance == null ? ' words' : ''}`
   return (
     <section className="stat-card">
       <div className="stat-title">Misrouted walk</div>
       <div className="stats">
         <div className={`stat${noNewWalk ? '' : ' main'}`}>
-          <span className="stat-value">{noNewWalk ? '—' : reading(misrouted)}</span>
+          <span className={noNewWalk ? 'stat-value' : valueClass(misrouted)}>{noNewWalk ? '—' : reading(misrouted)}</span>
           <span className="stat-label">from yourself</span>
         </div>
         <div className="stat">
-          <span className="stat-value">{reading(expected)}</span>
+          <span className={valueClass(expected)}>{reading(expected)}</span>
           <span className="stat-label">expected route</span>
         </div>
         <div className="stat">

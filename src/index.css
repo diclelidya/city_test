@@ -515,6 +515,7 @@ body {
 .stat {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   padding: 0 10px;
   border-left: 1px solid var(--border);
 }
@@ -535,6 +536,14 @@ body {
   font-weight: 600;
   line-height: 1.1;
   color: var(--blue-text);
+}
+
+/* Words instead of a number ("same as shortest"): smaller, and allowed to wrap inside the card */
+.stat-value.words,
+.stat.main .stat-value.words {
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .stat-label {
