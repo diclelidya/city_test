@@ -3,6 +3,7 @@ import CityScene from './CityScene.jsx'
 import { prepareCity } from './cityGeometry.js'
 import { makeProjection } from './projection.js'
 import { extraMinutes } from './extraMinutes.js'
+import { loadTaken, saveTaken, clearTaken } from './takenWalks.js'
 import {
   USE_LABELS,
   ROUTE_COLORS,
@@ -30,7 +31,7 @@ const MANIFESTO = [
   { text: 'The city knows where you are going.' },
   { text: 'It reads you by where you start and where you end, and leads you along the streets expected of you.' },
   { text: 'Stray.', light: true, pause: true },
-  { text: 'This app shows the walk expected of you, then takes the one you would least take, hour by hour.' },
+  { text: 'This app shows the walk expected of you, then hands you the one you would least take, hour by hour.' },
   {
     text: "The aim is not a better route: it is to make the city's quiet routing visible, and to measure how far you can stray from it.",
     light: true,
@@ -79,6 +80,10 @@ export default function App() {
   // The example walk is shown until the first click on the map.
   const [example, setExample] = useState(true)
   const exampleStarted = useRef(false)
+  // "Take this walk": the walks taken between each A and B, kept only in this browser, and the shown
+  // result that was just taken.
+  const [taken, setTaken] = useState(loadTaken)
+  const [takenId, setTakenId] = useState(null)
   const changeMemory = (m) => {
     setMemory(m)
     if (play) setPlay(null) // the played day was computed with the other setting
@@ -110,7 +115,13 @@ export default function App() {
                   ...p,
                   status: 'playing',
                   plainWays: msg.result.plainWays,
-                  results: msg.result.hours.map((r, h) => ({ id: `${msg.id}-${h}`, ...r })),
+                  takenCount: msg.result.takenCount,
+                  results: msg.result.hours.map((r, h) => ({
+                    id: `${msg.id}-${h}`,
+                    pair: msg.result.pair,
+                    takenCount: msg.result.takenCount,
+                    ...r,
+                  })),
                 },
             )
         } else setWalk((w) => ({ ...w, result: { id: msg.id, ...msg.result } }))
@@ -135,16 +146,17 @@ export default function App() {
         return
       }
       setWalk({ ...walk, b: xy })
-      requestWalk(walk.a, xy, time)
+      requestWalk(walk.a, xy, time, taken)
     },
-    [ready, walk, time],
+    [ready, walk, time, taken],
   )
 
-  const requestWalk = (a, b, t) => {
+  // `takenMap`: the taken walks to avoid, or null (the example walk never reads them).
+  const requestWalk = (a, b, t, takenMap) => {
     lastId.current += 1
     lastKind.current = 'misroute'
     setBusy(true)
-    worker.current.postMessage({ type: 'misroute', id: lastId.current, a, b, time: t })
+    worker.current.postMessage({ type: 'misroute', id: lastId.current, a, b, time: t, taken: takenMap })
   }
 
   // Show the example walk: weekday 12:00, A at the Bauhaus-Universität, B near the Markt.
@@ -154,7 +166,7 @@ export default function App() {
     setTime(EXAMPLE_TIME)
     setPlay(null)
     setWalk({ a, b: EXAMPLE_B, result: null })
-    requestWalk(a, EXAMPLE_B, EXAMPLE_TIME)
+    requestWalk(a, EXAMPLE_B, EXAMPLE_TIME, null)
   }
 
   // Once the street network is ready, open with the example walk (only once, and only if no walk is set).
@@ -174,7 +186,7 @@ export default function App() {
       return
     }
     setPlay(null)
-    if (walk.a && walk.b) requestWalk(walk.a, walk.b, t)
+    if (walk.a && walk.b) requestWalk(walk.a, walk.b, t, example ? null : taken)
   }
 
   const playDay = () => {
@@ -186,7 +198,35 @@ export default function App() {
     lastKind.current = 'misrouteDay'
     setBusy(false)
     setPlay({ status: 'preparing', day: time.day, memory, next: 0, played: [], savedHour: time.hour, results: null })
-    worker.current.postMessage({ type: 'misrouteDay', id: lastId.current, a: walk.a, b: walk.b, day: time.day, memory })
+    worker.current.postMessage({
+      type: 'misrouteDay',
+      id: lastId.current,
+      a: walk.a,
+      b: walk.b,
+      day: time.day,
+      memory,
+      taken: example ? null : taken,
+    })
+  }
+
+  // "Take this walk": keep the streets of the misrouted walk on screen under this A and B, in this browser
+  // only. The walk on screen stays; every later walk between them avoids its streets.
+  const takeWalk = () => {
+    const r = walk.result
+    const next = { ...taken, [r.pair]: [...(taken[r.pair] ?? []), [...r.misPath]] }
+    saveTaken(next)
+    setTaken(next)
+    setTakenId(r.id)
+    if (play) setPlay(null) // the played day was computed without this walk
+  }
+
+  // "Forget my walks": clear every taken walk, and read the current walk again without them.
+  const forgetWalks = () => {
+    clearTaken()
+    setTaken({})
+    setTakenId(null)
+    setPlay(null)
+    if (walk.a && walk.b && !example) requestWalk(walk.a, walk.b, time, null)
   }
 
   // One hour per second. After hour 23, go back to the hour that was set before playing.
@@ -237,7 +277,15 @@ export default function App() {
       .map(({ hour, route }) => ({ hour, line: route.line }))
   }, [play])
 
-  const routes = walk.result?.routes ? walk.result : null
+  // With no new way to stray, the map shows only the shortest and the expected route: no blue line, no
+  // blue building edges and no label at B.
+  const routes = useMemo(() => {
+    const r = walk.result
+    if (!r?.routes) return null
+    if (!r.noNewWalk) return r
+    const misrouted = { ...r.routes.misrouted, key: 'none', alongside: [], segments: [] }
+    return { ...r, notes: r.notes.filter((n) => !n.atB), routes: { ...r.routes, misrouted } }
+  }, [walk.result])
 
   return (
     <div className="app">
@@ -269,6 +317,10 @@ export default function App() {
           onReading={setReading}
           example={example}
           onExample={showExample}
+          takenNow={!!walk.result && walk.result.id === takenId}
+          anyTaken={Object.keys(taken).length > 0}
+          onTake={takeWalk}
+          onForget={forgetWalks}
         />
       </aside>
 
@@ -305,6 +357,10 @@ function MisroutePanel({
   onMemory,
   example,
   onExample,
+  takenNow,
+  anyTaken,
+  onTake,
+  onForget,
 }) {
   const r = walk.result
   const show = r?.routes && !busy
@@ -318,6 +374,8 @@ function MisroutePanel({
     text = `No walkable street within 100 m of ${r.which}. Click again to start over, closer to a street.`
   else if (r?.error === 'same') text = 'A and B snap to the same street node. Click again to start over.'
   else if (r?.error) text = `Something went wrong: ${r.message}`
+  else if (r?.noNewWalk)
+    text = 'No new way to stray between these points within twice the shortest route. Forget my walks to start again.'
   else if (example) text = exampleText(time)
   else text = `A and B snapped to the street nodes ${Math.round(r.snapA)} m and ${Math.round(r.snapB)} m from your clicks. Click again to start over.`
 
@@ -330,12 +388,31 @@ function MisroutePanel({
           {text}
         </p>
       ))}
-      {show && <WalkStats routes={r.routes} />}
+      {show && (
+        <WalkStats routes={r.routes} noNewWalk={r.noNewWalk} firstDistance={r.firstDistance} takenCount={r.takenCount} />
+      )}
+      {show && !example && !r.routes.misrouted.sameAsShortest && !r.noNewWalk && (
+        <button
+          className="take-walk"
+          disabled={takenNow || play?.status === 'preparing' || play?.status === 'playing'}
+          onClick={onTake}
+        >
+          {takenNow ? 'Taken · kept only in this browser' : 'Take this walk'}
+        </button>
+      )}
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
       {ready && !example && (
         <button className="example-link" onClick={onExample}>
           Show the example walk again
         </button>
+      )}
+      {anyTaken && (
+        <p className="forget">
+          <button className="example-link" onClick={onForget}>
+            Forget my walks
+          </button>
+          <span className="sub"> Taken walks stay only in this browser and are never sent anywhere.</span>
+        </p>
       )}
       <TimeControl
         time={time}
@@ -396,7 +473,7 @@ function MisroutePanel({
             </p>
           </section>
           <ol className="routes">
-            {ROUTES.map(([key, name, how]) => {
+            {ROUTES.filter(([key]) => !(key === 'misrouted' && r.noNewWalk)).map(([key, name, how]) => {
               const route = r.routes[key]
               return (
                 <li key={key}>
@@ -433,10 +510,10 @@ function MisroutePanel({
               )
             })}
           </ol>
-          {r.routes.expected.sameAsShortest && r.routes.misrouted.sameAsShortest && (
+          {!r.noNewWalk && r.routes.expected.sameAsShortest && r.routes.misrouted.sameAsShortest && (
             <p className="sub warn">Walk further to stray: try two points at least 500 m apart.</p>
           )}
-          {r.fellBack ? (
+          {r.noNewWalk ? null : r.fellBack ? (
             <p className="sub warn">
               Every misrouting was more than twice as long as the shortest route, so the misrouted walk is the shortest
               route here.
@@ -476,7 +553,7 @@ function MisroutePanel({
         <p>
           <strong>It is a guess, not a fact about anyone.</strong> It shows how a city that sorts people by where they
           come from and where they go would read this walk. The weights and affinities are assumptions written into the
-          app, not data. The misrouted walk is chosen by the app too, not by the walker.
+          app, not data. The misrouted walk is chosen by the app too; the visitor walks it.
         </p>
         <p>
           <strong>Sharpening.</strong> A mixed profile averages the affinities out: read as 34 % student, a walk
@@ -514,6 +591,16 @@ function MisroutePanel({
           shortest route still holds; where nothing fits, memory is dropped for that hour and the summary says so.
         </p>
         <p>
+          <strong>Take this walk.</strong> The misrouted walk is meant to be walked: in the street, with your own
+          body, followed from the map or a screenshot. "Take this walk" keeps its streets in this browser only; they
+          are never sent anywhere. The next misrouted walk between the same A and B, at every hour and on both days,
+          avoids them: a street costs once more for each taken walk on it. The limit of twice the shortest route still
+          holds, and a walk that shares 80 % or more of its length with a taken one does not count as new; when nothing
+          new fits, the map shows no misrouted walk. The first walk is the same for everyone. Each time you stray from
+          the same place, you can usually stray a little less far: the panel shows the first walk's number next to yours.
+          "Forget my walks" clears them. The example walk never changes.
+        </p>
+        <p>
           <strong>Play the day</strong> computes the walk for every hour from 0 to 23 on the chosen weekday or weekend,
           then plays one hour per second. Each hour's misrouted walk leaves a strand of faint blue footsteps, shifted a
           little sideways; where many hours take the same streets the strands pile up into a darker, denser trace.
@@ -545,7 +632,8 @@ function MisroutePanel({
 
 // The stat card at the top of the panel: how far the misrouted walk takes you from yourself, against the
 // expected route, and what straying costs in minutes over the shortest route.
-function WalkStats({ routes }) {
+// With taken walks between this A and B, a line under it says which walk this is and how far the first went.
+function WalkStats({ routes, noNewWalk, firstDistance, takenCount }) {
   const { misrouted, expected } = routes
   const reading = (route) => (route.sameAsShortest ? 'same as shortest' : route.distance == null ? 'no reading' : pct(route.distance))
   const extra = extraMinutes(routes)
@@ -553,8 +641,8 @@ function WalkStats({ routes }) {
     <section className="stat-card">
       <div className="stat-title">Misrouted walk</div>
       <div className="stats">
-        <div className="stat main">
-          <span className="stat-value">{reading(misrouted)}</span>
+        <div className={`stat${noNewWalk ? '' : ' main'}`}>
+          <span className="stat-value">{noNewWalk ? '—' : reading(misrouted)}</span>
           <span className="stat-label">from yourself</span>
         </div>
         <div className="stat">
@@ -562,10 +650,18 @@ function WalkStats({ routes }) {
           <span className="stat-label">expected route</span>
         </div>
         <div className="stat">
-          <span className="stat-value">{misrouted.sameAsShortest ? '±0' : `+${extra}`} min</span>
+          <span className="stat-value">{noNewWalk ? '—' : `${misrouted.sameAsShortest ? '±0' : `+${extra}`} min`}</span>
           <span className="stat-label">over the shortest</span>
         </div>
       </div>
+      {firstDistance !== undefined && (
+        <div className="stat-note">
+          {noNewWalk
+            ? `${takenCount} ${takenCount === 1 ? 'walk' : 'walks'} taken here`
+            : `walk ${takenCount + 1} here`}{' '}
+          · first walk {firstDistance == null ? 'same as shortest' : pct(firstDistance)}
+        </div>
+      )}
     </section>
   )
 }
@@ -700,25 +796,31 @@ function hourRanges(hours) {
 function DaySummary({ play, ways: found }) {
   const ways = [...found].sort((a, b) => b.hours.length - a.hours.length)
   const straying = new Set(ways.flatMap((w) => w.hours))
-  const never = play.played.filter((h) => !straying.has(h))
+  // Hours with no new way to stray (after taken walks) are named apart from hours that do not stray.
+  const noNew = play.played.filter((h) => play.results[h].noNewWalk)
+  const never = play.played.filter((h) => !straying.has(h) && !play.results[h].noNewWalk)
   const dayName = play.day === 'weekday' ? 'weekday' : 'weekend day'
+  const n = play.takenCount
+  const across = n ? `Across the ${dayName}, after ${n} ${n === 1 ? 'walk' : 'walks'} you took here,` : `Across the ${dayName},`
   const withMemory = play.memory ? ` with memory (${play.plainWays} without)` : ''
   // The four ways taken most often by name, the rest counted.
   const named = ways.slice(0, 4)
   const rest = ways.length - named.length
   let text
-  if (!ways.length) text = `Across the ${dayName}, this walk never strays from the shortest route.`
+  if (!ways.length)
+    text = noNew.length ? `${across} this walk finds no new way to stray.` : `${across} this walk never strays from the shortest route.`
   else if (ways.length === 1)
-    text = `Across the ${dayName}, this walk strays in one way${withMemory}, at ${never.length ? `hours ${hourRanges(ways[0].hours)}` : 'every hour'}.`
+    text = `${across} this walk strays in one way${withMemory}, at ${never.length || noNew.length ? `hours ${hourRanges(ways[0].hours)}` : 'every hour'}.`
   else
-    text = `Across the ${dayName}, this walk strays in ${ways.length} different ways${withMemory}: ${named
+    text = `${across} this walk strays in ${ways.length} different ways${withMemory}: ${named
       .map((w) => `${hourRanges(w.hours)} (${w.hours.length} ${w.hours.length === 1 ? 'hour' : 'hours'})`)
       .join(' · ')}${rest ? ` · and ${rest} more` : ''}.`
   const dropped = play.memory ? play.played.filter((h) => play.results[h].memoryDropped) : []
   return (
     <p className="day-summary">
       {text}
-      {ways.length > 0 && never.length > 0 && ` At ${hourRanges(never)} it does not stray from the shortest route.`}
+      {(ways.length > 0 || noNew.length > 0) && never.length > 0 && ` At ${hourRanges(never)} it does not stray from the shortest route.`}
+      {noNew.length > 0 && (ways.length > 0 || never.length > 0) && ` At ${hourRanges(noNew)} there is no new way to stray.`}
       {dropped.length > 0 && ` At ${hourRanges(dropped)} memory was dropped to stay within twice the shortest route.`}
       <span className="sub">
         {' '}

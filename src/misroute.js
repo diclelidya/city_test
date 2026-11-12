@@ -554,7 +554,10 @@ export function snap(data, xy) {
 }
 
 // `memory` (optional): how many earlier hours of a played day took each street, by street index.
-export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', hour: 12 }, memory = null) {
+// `taken` (optional): the walks taken earlier between this A and B ("Take this walk"), each a list of
+// street indices. Every misrouted walk then avoids their streets, and the result also says whether a new
+// way to stray was found (`noNewWalk`) and how far the first walk would take you (`firstDistance`).
+export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', hour: 12 }, memory = null, taken = null) {
   const A = snap(data, xyA)
   const B = snap(data, xyB)
   if (A.error || B.error) return { error: 'tooFar', which: A.error ? 'A' : 'B' }
@@ -590,32 +593,62 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
   const avoid = new Set([...shortestPath, ...expectedPath])
   // With memory, every street costs once more for each earlier hour whose misrouted walk took it; the
   // memory is softened together with the strength. If nothing fits even then, memory is dropped.
+  // Taken walks work the same way, a street costing once more for each taken walk on it, at every
+  // strength; they are never dropped.
+  const takenCount = taken?.length ? new Float32Array(data.edges.length) : null
+  if (takenCount) for (const walk of taken) for (const ei of walk) takenCount[ei] += 1
+  // The first strength whose misrouted walk fits within twice the shortest route, or null.
+  const fitWalk = (remember, counts) => {
+    for (const k of STRENGTHS) {
+      const recall = remember ? k / STRENGTHS[0] : 0
+      const soft = k / STRENGTHS[0]
+      const path = cheapestPath(
+        data,
+        A.node,
+        B.node,
+        counts
+          ? (ei) =>
+              len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1) * (1 + soft * ((remember ? memory[ei] : 0) + counts[ei]))
+          : (ei) => len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1) * (1 + recall * (memory?.[ei] ?? 0)),
+      )
+      const route = describeRoute(data, prep, A.node, path, aff, shared)
+      if (route.length <= MAX_DETOUR * shortest.length + 0.01) return { route, path, k }
+    }
+    return null
+  }
   let misrouted = null
   let misPath = shortestPath
   let strength = null
   let memoryDropped = false
   for (const remember of memory ? [true, false] : [false]) {
-    for (const k of STRENGTHS) {
-      const recall = remember ? k / STRENGTHS[0] : 0
-      const path = cheapestPath(
-        data,
-        A.node,
-        B.node,
-        (ei) => len(ei) * (1 + k * streetAff[ei]) * (avoid.has(ei) ? AVOID : 1) * (1 + recall * (memory?.[ei] ?? 0)),
-      )
-      const route = describeRoute(data, prep, A.node, path, aff, shared)
-      if (route.length <= MAX_DETOUR * shortest.length + 0.01) {
-        misrouted = route
-        misPath = path
-        strength = k
-        break
-      }
+    const fitted = fitWalk(remember, takenCount)
+    if (fitted) {
+      misrouted = fitted.route
+      misPath = fitted.path
+      strength = fitted.k
+      break
     }
-    if (misrouted) break
     if (memory) memoryDropped = true
   }
   const fellBack = !misrouted
-  if (fellBack) misrouted = describeRoute(data, prep, A.node, shortestPath, aff, shared)
+  // With taken walks: the first walk (no taken walks, no hour memory), and whether a new way was found.
+  // There is no new way when the taken walks leave nothing within twice the shortest route, or when the
+  // walk found shares 80 % or more of its length with a taken walk, or when the taken walks push it onto
+  // the shortest route although the first walk strays. Then the misrouted walk is the shortest route, so
+  // it leaves no trace, and the panel and map hide it.
+  let noNewWalk = false
+  let firstDistance
+  if (takenCount) {
+    const first = fitWalk(false, null)
+    firstDistance = first && !first.route.sameAsShortest ? first.route.distance : null
+    noNewWalk = fellBack
+      ? !!first
+      : misrouted.sameAsShortest
+        ? !!first && !first.route.sameAsShortest
+        : taken.some((walk) => sharesWay(data, misPath, walk))
+    if (noNewWalk && !fellBack) misPath = shortestPath
+  }
+  if (fellBack || noNewWalk) misrouted = describeRoute(data, prep, A.node, shortestPath, aff, shared)
   const expected = describeRoute(data, prep, A.node, expectedPath, aff, shared)
 
   // For drawing only: how far each street of the misrouted walk lies from the mix, so its line can be
@@ -653,43 +686,53 @@ export function computeMisroute(data, prep, xyA, xyB, time = { day: 'weekday', h
     },
     strength,
     fellBack,
+    noNewWalk: takenCount ? noNewWalk : undefined,
+    firstDistance, // the first walk's distance from yourself (null when it does not stray), only with taken walks
   }
 }
 
 // "Play the day": the same walk at every hour from 0 to 23, on a weekday or at the weekend.
 // With `memory`, the hours are walked in order and each hour's misrouted walk avoids the streets the
 // earlier hours' misrouted walks took, more strongly the more often they were taken.
-export function computeMisrouteDay(data, prep, xyA, xyB, day, { memory = false } = {}) {
-  const taken = memory ? new Float32Array(data.edges.length) : null
+// With `taken`, every hour also avoids the walks taken earlier between this A and B; hours with no new
+// way to stray count as hours that do not stray.
+export function computeMisrouteDay(data, prep, xyA, xyB, day, { memory = false, taken = null } = {}) {
+  const walked = memory ? new Float32Array(data.edges.length) : null
   const hours = Array.from({ length: 24 }, (_, hour) => {
-    const r = computeMisroute(data, prep, xyA, xyB, { day, hour }, taken)
-    if (taken && !r.error && !r.routes.misrouted.sameAsShortest) for (const ei of r.misPath) taken[ei] += 1
+    const r = computeMisroute(data, prep, xyA, xyB, { day, hour }, walked, taken)
+    if (walked && !r.error && !r.noNewWalk && !r.routes.misrouted.sameAsShortest) for (const ei of r.misPath) walked[ei] += 1
     return r
   })
   groupWays(data, hours)
   return hours
 }
 
+const SAME_WAY = 0.8
+const pathLength = (data, path) => path.reduce((sum, ei) => sum + data.edges[ei].length, 0)
+
+// Are two walks (lists of street indices) the same way: do they share at least 80 % of their length,
+// measured against the longer of the two?
+export function sharesWay(data, pathA, pathB) {
+  const streets = new Set(pathB)
+  const shared = pathA.reduce((sum, ei) => sum + (streets.has(ei) ? data.edges[ei].length : 0), 0)
+  return shared / Math.max(pathLength(data, pathA), pathLength(data, pathB)) >= SAME_WAY
+}
+
 // Two misrouted walks count as the same way when they share at least 80 % of their length,
 // measured against the longer of the two. Each straying hour gets `way`: the number of its way,
 // counted from the way taken at the most hours. Hours that do not stray get none.
-const SAME_WAY = 0.8
 function groupWays(data, hours) {
   const byKey = new Map()
   for (const r of hours) {
-    if (r.error || r.routes.misrouted.sameAsShortest) continue
+    if (r.error || r.noNewWalk || r.routes.misrouted.sameAsShortest) continue
     if (!byKey.has(r.routes.misrouted.key)) byKey.set(r.routes.misrouted.key, [])
     byKey.get(r.routes.misrouted.key).push(r)
   }
   const ways = []
   for (const same of [...byKey.values()].sort((a, b) => b.length - a.length)) {
     const path = same[0].misPath
-    const length = path.reduce((sum, ei) => sum + data.edges[ei].length, 0)
-    const way = ways.find((w) => {
-      const shared = path.reduce((sum, ei) => sum + (w.streets.has(ei) ? data.edges[ei].length : 0), 0)
-      return shared / Math.max(length, w.length) >= SAME_WAY
-    })
-    const id = way ? way.id : ways.push({ id: ways.length, streets: new Set(path), length }) - 1
+    const way = ways.find((w) => sharesWay(data, path, w.path))
+    const id = way ? way.id : ways.push({ id: ways.length, path }) - 1
     for (const r of same) r.way = id
   }
 }

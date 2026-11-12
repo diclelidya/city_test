@@ -102,6 +102,42 @@ body {
   color: var(--text);
 }
 
+/* "Forget my walks", in the same faint style, with its note on the same line */
+.forget {
+  margin: -6px 0 10px;
+  font-size: 12px;
+}
+
+.forget .example-link {
+  display: inline;
+  margin: 0;
+}
+
+/* "Take this walk": grey, since electric blue is kept for the misrouted walk */
+.take-walk {
+  display: block;
+  margin: -4px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.take-walk:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.take-walk:disabled {
+  font-weight: 400;
+  color: var(--muted);
+  cursor: default;
+}
+
 .status {
   margin: 0 0 10px;
 }
@@ -502,6 +538,13 @@ body {
 }
 
 .stat-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* With taken walks: which walk this is here, and the first walk's distance */
+.stat-note {
+  margin-top: 8px;
   font-size: 11px;
   color: var(--muted);
 }
