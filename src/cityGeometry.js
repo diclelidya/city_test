@@ -29,13 +29,7 @@ export function prepareCity({ kit, buildings, graph }) {
     bounds: { x0, y0, x1, y1 },
     buildings: buildings.features.map((f) => {
       const rings = f.geometry.coordinates.map((r) => r.map(project))
-      const corners = rings[0].slice(0, -1)
-      return {
-        use: f.properties.use ?? 'undefined',
-        height: f.properties.height,
-        rings,
-        centre: [0, 1].map((k) => corners.reduce((sum, c) => sum + c[k], 0) / corners.length),
-      }
+      return { height: f.properties.height, rings }
     }),
     streets: graph.edges.filter((e) => e.walkable).map((e) => e.coords.map(project)),
   }
@@ -92,11 +86,6 @@ export function streetsGeometry(streets, height) {
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   return g
-}
-
-// A flat area from a list of polygons (each a list of rings).
-export function areaGeometry(polygons) {
-  return layFlat(new THREE.ShapeGeometry(polygons.map(shapeFromRings), 1))
 }
 
 // "Walk from yourself": the outlines of some buildings as line segments, for a line drawing:

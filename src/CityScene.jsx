@@ -1,18 +1,11 @@
-// The 3D city: ground, streets, buildings and the three reach areas.
-// "Walk from yourself" draws the same city dark, in lines, with the misrouted walk as its one bright thing.
+// The 3D city, drawn dark and in lines: ground, streets, buildings, and the routes from A to B, with the
+// misrouted walk as its one bright thing.
 import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls, Line, Html } from '@react-three/drei'
-import { buildingsGeometry, paintBuildings, streetsGeometry, areaGeometry, outlineGeometry, footsteps } from './cityGeometry.js'
+import { buildingsGeometry, paintBuildings, streetsGeometry, outlineGeometry, footsteps } from './cityGeometry.js'
 import {
-  useColor,
-  REACH_COLORS,
-  AREA_TINTS,
-  GROUND,
-  STREET,
-  SHOP,
-  SHOP_SELECTED,
   ROUTE_COLORS,
   WALK_CORE,
   WALK_EDGES,
@@ -26,31 +19,19 @@ import {
 // A click that ends a drag (orbiting or panning) is not a pick.
 const isDrag = (e) => e.delta > 4
 
-// `paint`, when given, is a colour for every building and wins over everything else. With `dark`, every
-// building is the dark fill. `fade`, when given, is an opacity for every building: a first, invisible pass
-// then writes only their depth, so only the nearest wall of each building is blended over what lies
+// `paint`, when given, is a colour for every building; without it, every building is the dark fill.
+// `fade`, when given, is an opacity for every building: a first, invisible pass then writes only their depth, so only the nearest wall of each building is blended over what lies
 // behind: this avoids the flickering of overlapping see-through walls. Buildings fainter than 40 % skip
 // that pass, so the buildings behind them still show through.
-function Buildings({ city, levels, paint, fade, dark, onPick }) {
+function Buildings({ city, paint, fade, onPick }) {
   const invalidate = useThree((s) => s.invalidate)
   const merged = useMemo(() => buildingsGeometry(city.buildings), [city])
   const ghost = !!fade
   useEffect(() => () => merged.geometry.dispose(), [merged])
   useEffect(() => {
-    paintBuildings(
-      merged,
-      (i) =>
-        paint
-          ? paint[i]
-          : dark
-            ? DARK.fill
-            : levels && levels[i] >= 0
-              ? REACH_COLORS[levels[i]]
-              : useColor[city.buildings[i].use] ?? useColor.undefined,
-      ghost ? (i) => fade[i] : null,
-    )
+    paintBuildings(merged, (i) => (paint ? paint[i] : DARK.fill), ghost ? (i) => fade[i] : null)
     invalidate()
-  }, [merged, levels, paint, fade, ghost, dark, city, invalidate])
+  }, [merged, paint, fade, ghost, invalidate])
 
   return (
     <>
@@ -115,27 +96,7 @@ function Streets({ city, color }) {
   )
 }
 
-function ReachArea({ polygons, level }) {
-  const geometry = useMemo(() => areaGeometry(polygons), [polygons])
-  useEffect(() => () => geometry.dispose(), [geometry])
-  // Smaller areas sit slightly higher, so they are drawn on top.
-  return (
-    <mesh geometry={geometry} position-y={0.1 + (2 - level) * 0.15} raycast={() => null}>
-      <meshBasicMaterial color={AREA_TINTS[level]} />
-    </mesh>
-  )
-}
-
-function StartMarker({ xy }) {
-  return (
-    <mesh position={[xy[0], 25, -xy[1]]} raycast={() => null}>
-      <cylinderGeometry args={[10, 0.5, 50, 24]} />
-      <meshLambertMaterial color="#ffffff" emissive="#555555" />
-    </mesh>
-  )
-}
-
-// "Walk from yourself": A and B as round blue pins with the letter inside, standing on their point. They
+// A and B as round blue pins with the letter inside, standing on their point. They
 // are page elements, so buildings never cover them. Their shift goes in `style`: the 3D label library
 // sets the transform there and would override one from the stylesheet.
 const PIN_STYLE = { pointerEvents: 'none', transform: 'translate(-50%, -100%)' }
@@ -363,27 +324,6 @@ function TraceHover({ traces }) {
   )
 }
 
-// A pin above each building with shop space. Clicking a pin selects it in the list.
-function ShopPins({ city, shops, selected, onSelect }) {
-  return shops.map((shop) => {
-    const b = city.buildings[shop.index]
-    const on = shop.index === selected
-    const size = on ? 1.8 : 1
-    return (
-      <group key={shop.index} position={[b.centre[0], b.height, -b.centre[1]]}>
-        <mesh position-y={12 * size} onClick={(e) => (e.stopPropagation(), onSelect(shop.index))}>
-          <sphereGeometry args={[5 * size, 16, 12]} />
-          <meshLambertMaterial color={on ? SHOP_SELECTED : SHOP} emissive={on ? SHOP_SELECTED : SHOP} emissiveIntensity={0.35} />
-        </mesh>
-        <mesh position-y={6 * size} raycast={() => null}>
-          <cylinderGeometry args={[0.6, 0.6, 12 * size, 6]} />
-          <meshBasicMaterial color={on ? SHOP_SELECTED : SHOP} />
-        </mesh>
-      </group>
-    )
-  })
-}
-
 // Once A and B are set, the camera glides in about a second to frame the whole walk, keeping its angle.
 // The panel on the left is left out of the frame. Orbiting or zooming stops the glide.
 const PANEL_PX = 352
@@ -429,9 +369,8 @@ function FrameWalk({ frame }) {
   return null
 }
 
-export default function CityScene({ city, reach, walk, onPick, selectedShop, onSelectShop }) {
+export default function CityScene({ city, walk, onPick }) {
   const { x0, y0, x1, y1 } = city.bounds
-  const dark = !!walk
   const shown = walk?.routes?.routes
   const near = useMemo(() => {
     if (!shown) return null
@@ -478,24 +417,19 @@ export default function CityScene({ city, reach, walk, onPick, selectedShop, onS
       camera={{ position: [cx + 500, 1300, cz + 1500], fov: 35, near: 5, far: 20000 }}
       style={{ cursor: 'crosshair' }}
     >
-      <color attach="background" args={[dark ? DARK.background : '#e7e3da']} />
-      <hemisphereLight args={dark ? ['#ffffff', '#000000', 0.9] : ['#ffffff', '#cfc8bb', 1.6]} />
-      <directionalLight position={[-600, 1200, 400]} intensity={dark ? 0.7 : 1.6} />
-      <Ground city={city} color={dark ? DARK.ground : GROUND} onPick={onPick} />
-      <Streets city={city} color={dark ? DARK.street : STREET} />
-      <Buildings city={city} levels={reach?.buildingLevel} paint={paint} fade={fade} dark={dark} onPick={onPick} />
-      {dark && <CityEdges city={city} />}
-      {reach?.areas?.map((a, level) => (
-        <ReachArea key={`${reach.id}-${level}`} polygons={a.polygons} level={level} />
-      ))}
-      {reach?.start && <StartMarker xy={reach.start} />}
+      <color attach="background" args={[DARK.background]} />
+      <hemisphereLight args={['#ffffff', '#000000', 0.9]} />
+      <directionalLight position={[-600, 1200, 400]} intensity={0.7} />
+      <Ground city={city} color={DARK.ground} onPick={onPick} />
+      <Streets city={city} color={DARK.street} />
+      <Buildings city={city} paint={paint} fade={fade} onPick={onPick} />
+      <CityEdges city={city} />
       {walk?.strands?.length > 0 && <Footsteps strands={walk.strands} />}
       {walk?.traces?.length > 0 && <TraceHover traces={walk.traces} />}
       {shown && <Routes city={city} routes={shown} unknown={unknown} />}
       {walk?.routes?.notes && <RouteNotes notes={walk.routes.notes} />}
       {walk?.a && <WalkPin xy={walk.routes?.start ?? walk.a} label="A" />}
       {walk?.b && <WalkPin xy={walk.routes?.end ?? walk.b} label="B" />}
-      {reach?.shops && <ShopPins city={city} shops={reach.shops} selected={selectedShop} onSelect={onSelectShop} />}
       <FrameWalk frame={frame} />
       <OrbitControls makeDefault target={[cx, 0, cz]} maxPolarAngle={Math.PI / 2.15} minDistance={60} maxDistance={6000} />
     </Canvas>

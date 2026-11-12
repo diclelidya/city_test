@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CityScene from './CityScene.jsx'
 import { prepareCity } from './cityGeometry.js'
 import {
-  USE_COLORS,
-  REACH_COLORS,
-  SHOP,
+  USE_LABELS,
   ROUTE_COLORS,
   WALK_EDGES,
   DARK,
@@ -25,6 +23,9 @@ const FILES = { kit: 'kit.json', buildings: 'buildings.geojson', graph: 'streets
 const ATTRIBUTION =
   'Buildings: 3D building models LoD2 © GDI-Th (dl-de/by-2-0). Land use and pedestrian network: Egor Gaydukov, InfAU, Bauhaus-Universität Weimar. Census grid: Zensus 2022, © Statistische Ämter des Bundes und der Länder (dl-de/by-2-0).'
 
+const INTRO =
+  'The city reads you by where you come from and where you go, and routes you along the streets it expects of you. This app shows that reading, then misroutes you and measures how far the walk takes you from yourself.'
+
 const fmt = (n) => n.toLocaleString('en-GB')
 
 // Load every data file through BASE_URL, so it works on localhost and on GitHub Pages.
@@ -44,11 +45,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [reach, setReach] = useState(null)
-  const [selectedShop, setSelectedShop] = useState(null)
-  // The app opens in "Walk from yourself", drawn dark; the walking reach keeps its light look.
-  const [mode, setMode] = useState('misroute')
-  // The second mode: start A, destination B, and the routes between them.
+  // Start A, destination B, and the routes between them.
   const [walk, setWalk] = useState({ a: null, b: null, result: null })
   const [time, setTime] = useState({ day: 'weekday', hour: 12 })
   // "Play the day": all 24 hours of the current walk, which hours have been played, and where playback is.
@@ -63,7 +60,7 @@ export default function App() {
   }
   const worker = useRef(null)
   const lastId = useRef(0)
-  const lastKind = useRef('reach')
+  const lastKind = useRef('misroute')
 
   useEffect(() => {
     loadFiles().then(setFiles).catch((e) => setError(e.message))
@@ -78,10 +75,7 @@ export default function App() {
       if (msg.type === 'ready') setReady(true)
       // Only show the answer to the latest click.
       if (msg.type === 'result' && msg.id === lastId.current) {
-        if (lastKind.current === 'reach') {
-          setReach({ id: msg.id, ...msg.result })
-          setSelectedShop(null)
-        } else if (lastKind.current === 'misrouteDay') {
+        if (lastKind.current === 'misrouteDay') {
           // All 24 hours are ready: start playing them.
           if (msg.result.error) setPlay(null)
           else
@@ -106,13 +100,6 @@ export default function App() {
   const pick = useCallback(
     (xy) => {
       if (!ready) return
-      if (mode === 'reach') {
-        lastId.current += 1
-        lastKind.current = 'reach'
-        setBusy(true)
-        worker.current.postMessage({ type: 'reach', id: lastId.current, xy })
-        return
-      }
       // First click: A. Second click: B, then the routes. A third click starts over.
       setPlay(null) // a new A or B clears the day and its traces
       if (!walk.a || walk.b) {
@@ -124,7 +111,7 @@ export default function App() {
       setWalk({ ...walk, b: xy })
       requestWalk(walk.a, xy, time)
     },
-    [ready, mode, walk, time],
+    [ready, walk, time],
   )
 
   const requestWalk = (a, b, t) => {
@@ -207,196 +194,40 @@ export default function App() {
       .map(({ hour, route }) => ({ hour, line: route.line }))
   }, [play])
 
-  const switchMode = (m) => {
-    if (m === mode) return
-    lastId.current += 1 // an answer for the other mode is no longer wanted
-    setBusy(false)
-    if (play?.status === 'preparing') setPlay(null)
-    else if (play?.status === 'playing') setPlay({ ...play, status: 'paused' })
-    setMode(m)
-  }
-
   const routes = walk.result?.routes ? walk.result : null
 
   return (
-    <div className={`app${mode === 'misroute' ? ' dark' : ''}`}>
+    <div className="app">
       {city ? (
-        <CityScene
-          city={city}
-          reach={mode === 'reach' && reach?.areas ? reach : null}
-          walk={mode === 'misroute' ? { a: walk.a, b: walk.b, routes, traces, strands, reading } : null}
-          onPick={pick}
-          selectedShop={selectedShop}
-          onSelectShop={setSelectedShop}
-        />
+        <CityScene city={city} walk={{ a: walk.a, b: walk.b, routes, traces, strands, reading }} onPick={pick} />
       ) : (
         <div className="loading">{error ? `The city kit didn't load (${error}).` : 'Loading the city…'}</div>
       )}
 
       <aside className="panel">
-        <div className="modes" role="tablist">
-          <button role="tab" aria-selected={mode === 'reach'} className={mode === 'reach' ? 'on' : ''} onClick={() => switchMode('reach')}>
-            Walking reach
-          </button>
-          <button role="tab" aria-selected={mode === 'misroute'} className={mode === 'misroute' ? 'on' : ''} onClick={() => switchMode('misroute')}>
-            Walk from yourself
-          </button>
-        </div>
-        {mode === 'misroute' ? (
-          <MisroutePanel
-            ready={ready}
-            busy={busy}
-            walk={walk}
-            time={time}
-            onTime={changeTime}
-            play={play}
-            traces={traces}
-            ways={ways}
-            onPlay={playDay}
-            memory={memory}
-            onMemory={changeMemory}
-            reading={reading}
-            onReading={setReading}
-          />
-        ) : (
-          <>
-            <h1>How far can you walk?</h1>
-            <Status ready={ready} busy={busy} reach={reach} />
-            {reach?.areas && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Walk</th>
-                    <th>Buildings</th>
-                    <th>Residents</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reach.areas.map((a, i) => (
-                    <tr key={a.minutes}>
-                      <td>
-                        <span className="swatch" style={{ background: REACH_COLORS[i] }} />
-                        {a.minutes} min
-                      </td>
-                      <td className="num">{fmt(a.buildings)}</td>
-                      <td className="num">
-                        about {fmt(a.residents)}
-                        {a.unknownCells > 0 && (
-                          <div className="unknown">
-                            + {a.unknownCells} {a.unknownCells === 1 ? 'cell' : 'cells'} without a figure
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {reach?.shops && <ShopList shops={reach.shops} selected={selectedShop} onSelect={setSelectedShop} />}
-            <div className="method">
-              <p>
-                Walking speed is 4.8 km/h, which is 80 m per minute, along the pedestrian network from the street node
-                nearest to your click. Each area is the streets reached in that time, including part of the last street,
-                with a band of 25 m on each side, joined into one shape. A building counts if it touches the area. The
-                counts for 10 and 15 minutes include the shorter walks.
-              </p>
-              <p>
-                Residents come from the 100 m cells of the Zensus 2022. For every cell that overlaps the area, we take its
-                population times the share of the cell's area that lies inside, add these up and round to the nearest 10.
-                Cells where the census published no figure are left out of the sum and counted separately.
-              </p>
-              <p>
-                Shops: the data has no individual shops, only floor area per use for each building. The list shows every
-                building with some retail floor area that the 5-minute area touches. Its walk is measured along the
-                network to the nearest point of the street closest to the building.
-              </p>
-            </div>
-          </>
-        )}
+        <MisroutePanel
+          ready={ready}
+          busy={busy}
+          walk={walk}
+          time={time}
+          onTime={changeTime}
+          play={play}
+          traces={traces}
+          ways={ways}
+          onPlay={playDay}
+          memory={memory}
+          onMemory={changeMemory}
+          reading={reading}
+          onReading={setReading}
+        />
       </aside>
 
       <aside className="legend">
-        {mode === 'misroute' ? (
-          <WalkLegend routes={routes} reading={reading} traces={traces} />
-        ) : (
-          <>
-            <h2>Main use of building</h2>
-            <ul>
-              {USE_COLORS.map(([key, label, color]) => (
-                <li key={key}>
-                  <span className="swatch" style={{ background: color }} />
-                  {label}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        <WalkLegend routes={routes} reading={reading} traces={traces} />
       </aside>
 
       <footer className="attribution">{ATTRIBUTION}</footer>
     </div>
-  )
-}
-
-function Status({ ready, busy, reach }) {
-  let text
-  if (!ready) text = 'Preparing the street network…'
-  else if (busy) text = 'Walking…'
-  else if (reach?.error === 'tooFar')
-    text = 'No walkable street within 100 m of that point. Try clicking closer to a street.'
-  else if (reach?.error) text = `Something went wrong: ${reach.message}`
-  else if (reach) text = `Starting from the street node ${Math.round(reach.snapDistance)} m from your click.`
-  else text = 'Click on the ground to see how far you can walk in 5, 10 and 15 minutes. Drag to orbit, right-drag to pan, scroll to zoom.'
-  return <p className={`status${reach?.error && !busy ? ' warn' : ''}`}>{text}</p>
-}
-
-const USE_LABEL = Object.fromEntries(USE_COLORS.map(([key, label]) => [key, label]))
-
-// Buildings with retail space within 5 minutes. Hovering or clicking a row marks its pin on the map.
-function ShopList({ shops, selected, onSelect }) {
-  const rows = useRef(new Map())
-  useEffect(() => {
-    rows.current.get(selected)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selected])
-  return (
-    <section className="shops">
-      <h2>
-        <span className="swatch" style={{ background: SHOP }} />
-        Shops within 5 minutes
-      </h2>
-      {shops.length === 0 ? (
-        <p className="empty">No building with retail space in the 5-minute area.</p>
-      ) : (
-        <>
-          <p className="hint">
-            {shops.length} {shops.length === 1 ? 'building has' : 'buildings have'} retail space, largest first.
-          </p>
-          <ol>
-            {shops.map((shop) => (
-              <li
-                key={shop.index}
-                ref={(el) => (el ? rows.current.set(shop.index, el) : rows.current.delete(shop.index))}
-                className={shop.index === selected ? 'selected' : ''}
-                onMouseEnter={() => onSelect(shop.index)}
-                onClick={() => onSelect(shop.index)}
-              >
-                <div>
-                  <strong>{fmt(Math.round(shop.retail))} m² retail</strong>
-                  <div className="sub">
-                    building {shop.id} · {shop.floors} {shop.floors === 1 ? 'floor' : 'floors'} · mainly{' '}
-                    {USE_LABEL[shop.use] ?? shop.use}
-                  </div>
-                </div>
-                <div className="walk">
-                  ≈ {Math.max(1, Math.round(shop.walk / 80))} min
-                  <div className="sub">{fmt(Math.round(shop.walk / 10) * 10)} m</div>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </>
-      )}
-    </section>
   )
 }
 
@@ -414,7 +245,8 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
   let text
   if (!ready) text = 'Preparing the street network…'
   else if (busy) text = 'Reading the walk…'
-  else if (!walk.a) text = 'Click on the ground to set the start (A).'
+  else if (!walk.a)
+    text = 'Click twice on the map: first where you start (A), then where you go (B). Drag to orbit, right-drag to pan, scroll to zoom.'
   else if (!walk.b) text = 'Now click to set the destination (B).'
   else if (r?.error === 'tooFar')
     text = `No walkable street within 100 m of ${r.which}. Click again to start over, closer to a street.`
@@ -426,6 +258,7 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
   return (
     <>
       <h1>How far can you walk from yourself?</h1>
+      <p className="intro">{INTRO}</p>
       {show && <WalkStats routes={r.routes} />}
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
       <TimeControl
@@ -472,8 +305,8 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
               ))}
             </ul>
             <p className="close-far">
-              <span>Close to you: {r.closeUses.map((u) => USE_LABEL[u] ?? u).join(', ')}</span>
-              <span>Far from you: {r.farUses.map((u) => USE_LABEL[u] ?? u).join(', ')}</span>
+              <span>Close to you: {r.closeUses.map((u) => USE_LABELS[u] ?? u).join(', ')}</span>
+              <span>Far from you: {r.farUses.map((u) => USE_LABELS[u] ?? u).join(', ')}</span>
             </p>
             <p className="sub">
               Purpose: {r.purpose}.{r.atEdge && ' A lies near the edge of the kit, which leans a little towards commuter.'}{' '}
@@ -515,7 +348,7 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
                     <div className="sub">
                       passes mainly{' '}
                       {route.mainUses.length
-                        ? route.mainUses.map((u) => `${USE_LABEL[u.use] ?? u.use} ${pct(u.share)}`).join(', ')
+                        ? route.mainUses.map((u) => `${USE_LABELS[u.use] ?? u.use} ${pct(u.share)}`).join(', ')
                         : 'no buildings with a known use'}
                       {route.unknownShare > 0 && ` · use not known for ${pct(route.unknownShare)} of the floor area`}
                     </div>
@@ -655,7 +488,7 @@ function WalkStats({ routes }) {
   )
 }
 
-// The small legend of the dark "Walk from yourself" view.
+// The small legend at the top right.
 function WalkLegend({ routes, reading, traces }) {
   return (
     <>

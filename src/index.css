@@ -7,14 +7,24 @@ body,
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
-  background: #e7e3da;
-  color: #1c1c1c;
+  background: #08090b;
 }
 
+/* A dark city in lines, with the misrouted walk as its one bright thing. */
 .app {
+  --bg: #08090b;
+  --card: rgba(16, 18, 22, 0.92);
+  --card-2: rgba(255, 255, 255, 0.035);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #e4e6ea;
+  --muted: #8b9099;
+  --blue: #3d6bff;
+  --blue-text: #7f9bff;
   position: relative;
   height: 100%;
   overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .loading {
@@ -27,9 +37,12 @@ body {
 .panel,
 .legend {
   position: absolute;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  color: var(--text);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -45,7 +58,13 @@ body {
 
 .panel h1 {
   margin: 0 0 6px;
-  font-size: 17px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.intro {
+  margin: 0 0 10px;
 }
 
 .status {
@@ -53,88 +72,15 @@ body {
 }
 
 .status.warn {
-  color: #9a3412;
+  color: #f0a86a;
 }
 
-.panel table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 10px;
-}
-
-.panel th {
-  text-align: left;
-  font-weight: 600;
-  color: #555;
-  border-bottom: 1px solid #ddd;
-  padding: 4px 0;
-}
-
-.panel th:not(:first-child),
 .num {
   text-align: right;
 }
 
-.panel td {
-  padding: 5px 0;
-  vertical-align: top;
-  border-bottom: 1px solid #eee;
-}
-
-.unknown {
-  font-size: 11px;
-  color: #777;
-}
-
-.shops {
-  margin: 4px 0 12px;
-}
-
-.shops h2 {
-  margin: 0 0 2px;
-  font-size: 14px;
-}
-
-.shops .hint,
-.shops .empty {
-  margin: 0 0 6px;
-  color: #555;
-}
-
-.shops ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 220px;
-  overflow-y: auto;
-  border-top: 1px solid #eee;
-}
-
-.shops li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 6px;
-  border-bottom: 1px solid #eee;
-  cursor: pointer;
-}
-
-.shops li.selected {
-  background: #fbe9d4;
-}
-
-.shops .sub {
-  font-size: 11px;
-  color: #666;
-}
-
-.shops .walk {
-  text-align: right;
-  white-space: nowrap;
-}
-
 .method {
-  color: #444;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -149,18 +95,14 @@ body {
   border-radius: 2px;
   margin-right: 7px;
   vertical-align: -1px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .legend {
   top: 16px;
   right: 16px;
-  padding: 10px 14px;
-}
-
-.legend h2 {
-  margin: 0 0 6px;
-  font-size: 13px;
+  padding: 10px 12px;
+  font-size: 11px;
 }
 
 .legend ul {
@@ -169,15 +111,23 @@ body {
   padding: 0;
 }
 
+.legend li {
+  padding: 1px 0;
+}
+
+.legend .legend-note {
+  color: var(--muted);
+}
+
 .attribution {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(8, 9, 11, 0.85);
   font-size: 11px;
-  color: #444;
+  color: #7a7f88;
 }
 
 @media (max-width: 700px) {
@@ -191,13 +141,13 @@ body {
   }
 }
 
-/* Mode switch and "Walk from yourself" panel */
+/* The panel: profile, routes and time */
 .modes {
   display: flex;
   gap: 4px;
   margin: 0 0 10px;
   padding: 3px;
-  background: #eeebe5;
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 6px;
 }
 
@@ -208,16 +158,26 @@ body {
   padding: 5px 6px;
   font: inherit;
   font-size: 12px;
-  color: #555;
+  color: var(--muted);
   background: transparent;
   cursor: pointer;
 }
 
 .modes button.on {
-  background: #fff;
-  color: #1c1c1c;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: none;
+}
+
+.reading,
+.routes,
+.day-summary {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .reading h2 {
@@ -241,7 +201,7 @@ body {
 
 .bar {
   height: 8px;
-  background: #eeebe5;
+  background: rgba(255, 255, 255, 0.07);
   border-radius: 4px;
   overflow: hidden;
 }
@@ -249,12 +209,12 @@ body {
 .bar span {
   display: block;
   height: 100%;
-  background: #444;
+  background: #aeb3bb;
 }
 
 .panel .sub {
   font-size: 11px;
-  color: #666;
+  color: var(--muted);
 }
 
 .panel p.sub {
@@ -262,19 +222,20 @@ body {
 }
 
 .panel .sub.warn {
-  color: #9a3412;
+  color: #f0a86a;
 }
 
 .routes {
   list-style: none;
-  margin: 8px 0 10px;
-  padding: 0;
-  border-top: 1px solid #eee;
 }
 
 .routes li {
   padding: 6px 0;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
+}
+
+.routes li:last-child {
+  border-bottom: 0;
 }
 
 .route-head {
@@ -319,21 +280,18 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: #2b2b2b;
+  background: var(--blue);
   cursor: pointer;
 }
 
 .time .play:disabled {
-  background: #d8d4cc;
-  color: #777;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
   cursor: default;
 }
 
 .day-summary {
-  margin: 0 0 10px;
-  padding: 7px 9px;
-  border-left: 3px solid #1f3bff;
-  background: #f1f3ff;
+  border-left: 2px solid var(--blue);
 }
 
 .modes.small {
@@ -352,13 +310,19 @@ body {
 .time input {
   flex: 1;
   min-width: 0;
-  accent-color: #444;
+  accent-color: #aeb3bb;
 }
 
 .legend-lines {
   margin-top: 6px !important;
   padding-top: 6px !important;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border);
+}
+
+.legend .legend-lines:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 0;
 }
 
 .trace-label {
@@ -380,11 +344,11 @@ body {
 .reading-toggle input {
   margin: 0 6px 0 0;
   vertical-align: -2px;
-  accent-color: #444;
+  accent-color: #aeb3bb;
 }
 
 .reading-toggle.off {
-  color: #888;
+  color: #5d626b;
   cursor: default;
 }
 
@@ -392,7 +356,7 @@ body {
   width: 170px;
   height: 10px;
   border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .read-labels {
@@ -401,7 +365,7 @@ body {
   width: 172px;
   margin: 2px 0 6px;
   font-size: 11px;
-  color: #555;
+  color: var(--muted);
 }
 
 .line-swatch.footsteps {
@@ -413,12 +377,12 @@ body {
 /* The sharpened weights next to the bars, small and grey */
 .bars .sharp {
   font-size: 11px;
-  color: #8a8a8a;
+  color: var(--muted);
 }
 
 .bars .bars-head {
   font-size: 10px;
-  color: #8a8a8a;
+  color: var(--muted);
 }
 
 .close-far {
@@ -433,14 +397,14 @@ body {
 .time .memory {
   flex: 1 1 100%;
   font-size: 12px;
-  color: #444;
+  color: var(--muted);
   cursor: pointer;
 }
 
 .time .memory input {
   margin: 0 6px 0 0;
   vertical-align: -2px;
-  accent-color: #444;
+  accent-color: #aeb3bb;
 }
 
 .time label.memory {
@@ -450,151 +414,6 @@ body {
 .time .memory input {
   flex: none;
   min-width: auto;
-}
-
-/* ------------------------------------------------------------------------------------------------
-   "Walk from yourself": a dark city in lines. Everything below applies only in that mode; the
-   walking reach keeps its light look.
-   ------------------------------------------------------------------------------------------------ */
-.app.dark {
-  --bg: #08090b;
-  --card: rgba(16, 18, 22, 0.92);
-  --card-2: rgba(255, 255, 255, 0.035);
-  --border: rgba(255, 255, 255, 0.09);
-  --text: #e4e6ea;
-  --muted: #8b9099;
-  --blue: #3d6bff;
-  --blue-text: #7f9bff;
-  background: var(--bg);
-  color: var(--text);
-}
-
-.app.dark .panel,
-.app.dark .legend {
-  background: var(--card);
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
-  color: var(--text);
-}
-
-.app.dark .panel h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.app.dark .panel .sub,
-.app.dark .method,
-.app.dark .bars .sharp,
-.app.dark .bars .bars-head,
-.app.dark .read-labels,
-.app.dark .time .memory {
-  color: var(--muted);
-}
-
-.app.dark .status.warn,
-.app.dark .panel .sub.warn {
-  color: #f0a86a;
-}
-
-.app.dark .modes {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.app.dark .modes button {
-  color: var(--muted);
-}
-
-.app.dark .modes button.on {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-  box-shadow: none;
-}
-
-.app.dark .time .play {
-  background: var(--blue);
-}
-
-.app.dark .time .play:disabled {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--muted);
-}
-
-.app.dark .time input,
-.app.dark .reading-toggle input,
-.app.dark .time .memory input {
-  accent-color: #aeb3bb;
-}
-
-.app.dark .reading-toggle.off {
-  color: #5d626b;
-}
-
-.app.dark .bar {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.app.dark .bar span {
-  background: #aeb3bb;
-}
-
-.app.dark .reading,
-.app.dark .routes,
-.app.dark .day-summary {
-  margin: 0 0 10px;
-  padding: 10px 12px;
-  background: var(--card-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.app.dark .routes li {
-  border-bottom: 1px solid var(--border);
-}
-
-.app.dark .routes li:last-child {
-  border-bottom: 0;
-}
-
-.app.dark .day-summary {
-  border-left: 2px solid var(--blue);
-}
-
-.app.dark .attribution {
-  background: rgba(8, 9, 11, 0.85);
-  color: #7a7f88;
-}
-
-.app.dark .swatch {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.app.dark .legend-lines {
-  border-top: 1px solid var(--border);
-}
-
-.app.dark .legend .legend-lines:first-child {
-  margin-top: 0 !important;
-  padding-top: 0 !important;
-  border-top: 0;
-}
-
-.app.dark .legend {
-  font-size: 11px;
-  padding: 10px 12px;
-}
-
-.app.dark .legend li {
-  padding: 1px 0;
-}
-
-.app.dark .legend .legend-note {
-  color: var(--muted);
-}
-
-.app.dark .read-scale {
-  border-color: rgba(255, 255, 255, 0.15);
 }
 
 /* The stat card at the top of the panel */
@@ -654,7 +473,7 @@ body {
 details.method {
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px solid var(--border, #eee);
+  border-top: 1px solid var(--border);
 }
 
 details.method summary {

@@ -1,5 +1,5 @@
-// Runs the reach calculation off the main thread, so the 3D view stays smooth while it works.
-import { prepareData, computeReach } from './reach.js'
+// Runs the walk calculation off the main thread, so the 3D view stays smooth while it works.
+import { prepareData } from './reach.js'
 import { prepareMisroute, computeMisroute, computeMisrouteDay, waysOf } from './misroute.js'
 
 let data = null
@@ -10,14 +10,9 @@ self.onmessage = ({ data: msg }) => {
     data = prepareData(msg.files)
     misrouteData = prepareMisroute(data, msg.files)
     self.postMessage({ type: 'ready' })
-  } else if (msg.type === 'reach' || msg.type === 'misroute' || msg.type === 'misrouteDay') {
+  } else if (msg.type === 'misroute' || msg.type === 'misrouteDay') {
     try {
-      const result =
-        msg.type === 'reach'
-          ? computeReach(data, msg.xy)
-          : msg.type === 'misroute'
-            ? computeMisroute(data, misrouteData, msg.a, msg.b, msg.time)
-            : playDay(msg)
+      const result = msg.type === 'misroute' ? computeMisroute(data, misrouteData, msg.a, msg.b, msg.time) : playDay(msg)
       self.postMessage({ type: 'result', id: msg.id, result })
     } catch (e) {
       self.postMessage({ type: 'result', id: msg.id, result: { error: 'failed', message: String(e) } })

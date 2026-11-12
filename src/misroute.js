@@ -177,7 +177,7 @@ function lineNearFootprint(pts, b, limit) {
 
 // --- preparation (once) -------------------------------------------------------------------
 
-// Adds what this mode needs to the data prepared for the walking reach:
+// Adds what this mode needs to the prepared street and building data:
 // floor area per use for each building, the buildings near each street, and the census figures.
 export function prepareMisroute(data, files) {
   const floorAreas = files.buildings.features.map((f) => f.properties.floor_area_m2 ?? {})
@@ -324,7 +324,7 @@ function cheapestPath(data, a, b, cost) {
   dist[a] = 0
   const heap = [[0, a]]
   while (heap.length) {
-    // A small binary heap, as in the walking reach.
+    // A small binary heap.
     const [d, u] = heap[0]
     const last = heap.pop()
     if (heap.length) {
