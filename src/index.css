@@ -48,6 +48,7 @@ body {
 }
 
 .panel {
+  z-index: 10;
   top: 16px;
   left: 16px;
   width: 320px;
@@ -64,7 +65,41 @@ body {
 }
 
 .intro {
+  margin: 0 0 8px;
+  color: #b4b9c1;
+}
+
+/* The aim sentence: its own paragraph, same size, in the heading colour */
+.intro.light {
+  color: var(--text);
+}
+
+/* "Stray." stands apart, as a pause: more space above and below than the other lines. */
+.intro.pause {
+  margin: 16px 0;
+}
+
+.intro.aim {
   margin: 0 0 10px;
+}
+
+/* "Show the example walk again": a faint button that reads as a text link */
+.example-link {
+  display: block;
+  margin: -6px 0 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.example-link:hover {
+  color: var(--text);
 }
 
 .status {
@@ -99,6 +134,7 @@ body {
 }
 
 .legend {
+  z-index: 10;
   top: 16px;
   right: 16px;
   padding: 10px 12px;
@@ -121,6 +157,7 @@ body {
 
 .attribution {
   position: absolute;
+  z-index: 10;
   left: 0;
   right: 0;
   bottom: 0;
@@ -583,6 +620,44 @@ details.method summary {
 .route-label.at-b .label-text {
   color: #e4e6ea;
   border: 1px solid rgba(127, 155, 255, 0.35);
+}
+
+/* A label that would run off the right edge of the screen sits left of its point instead */
+.route-label.flip {
+  flex-direction: row-reverse;
+}
+
+.route-label.flip .label-text {
+  text-align: right;
+}
+
+/* The label at B: what straying costs in minutes, and the distance from yourself below it, smaller */
+.label-sub.small {
+  font-size: 9px;
+}
+
+/* Place names of the example walk: small and faint, above the label at B and left of the A pin */
+.label-place,
+.pin-place {
+  font: 400 9px/1.25 system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8b9099;
+  white-space: nowrap;
+}
+
+.label-place {
+  display: block;
+  margin-bottom: 1px;
+}
+
+.pin-place {
+  position: absolute;
+  top: 5px;
+  right: calc(100% + 6px);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(8, 9, 11, 0.7);
 }
 
 /* A and B: round blue pins with the letter inside, standing on their point */

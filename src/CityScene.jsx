@@ -1,8 +1,8 @@
 // The 3D city, drawn dark and in lines: ground, streets, buildings, and the routes from A to B, with the
 // misrouted walk as its one bright thing.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Line, Html } from '@react-three/drei'
 import { buildingsGeometry, paintBuildings, streetsGeometry, outlineGeometry, footsteps } from './cityGeometry.js'
 import {
@@ -15,6 +15,7 @@ import {
   READ_UNKNOWN_EDGE,
   WALK_OPACITY,
 } from './palette.js'
+import { extraMinutes } from './extraMinutes.js'
 
 // A click that ends a drag (orbiting or panning) is not a pick.
 const isDrag = (e) => e.delta > 4
@@ -98,11 +99,13 @@ function Streets({ city, color }) {
 
 // A and B as round blue pins with the letter inside, standing on their point. They
 // are page elements, so buildings never cover them. Their shift goes in `style`: the 3D label library
-// sets the transform there and would override one from the stylesheet.
+// sets the transform there and would override one from the stylesheet. `place`, when given, is a small
+// faint place name left of the pin.
 const PIN_STYLE = { pointerEvents: 'none', transform: 'translate(-50%, -100%)' }
-function WalkPin({ xy, label }) {
+function WalkPin({ xy, label, place }) {
   return (
     <Html position={[xy[0], 0, -xy[1]]} className="walk-pin" zIndexRange={[6, 0]} style={PIN_STYLE}>
+      {place && <span className="pin-place">{place}</span>}
       <span className="pin-head">{label}</span>
       <span className="pin-dot" />
     </Html>
@@ -225,27 +228,76 @@ function notePosition(el, camera, size) {
 
 // A few labels along the routes: small, uppercase, with a short leader line from a dot on the route and
 // a dark backing. They are page labels, so the buildings never cover them. The label at B sits to the
-// right of its pin.
+// right of its pin. A label that would run off the right edge of the screen sits left of its point
+// instead (`flip`), with its dot and leader on its right; it moves back when there is room again.
 const LABEL_STYLE = { pointerEvents: 'none', transform: 'translate(-3px, -50%)' }
+const LABEL_FLIP_STYLE = { pointerEvents: 'none', transform: 'translate(calc(-100% + 3px), -50%)' }
 const LABEL_AT_B_STYLE = { pointerEvents: 'none', transform: 'translate(18px, -100%)' }
-function RouteNotes({ notes }) {
-  return notes.map((n, i) => (
-    <Html
-      key={`${i}-${n.text}`}
-      position={[n.xy[0], 4, -n.xy[1]]}
-      className={`route-label ${n.tone}${n.atB ? ' at-b' : ''}`}
-      calculatePosition={notePosition}
-      zIndexRange={[5, 0]}
-      style={n.atB ? LABEL_AT_B_STYLE : LABEL_STYLE}
-    >
-      {!n.atB && <span className="label-dot" />}
-      {!n.atB && <span className="label-leader" />}
-      <span className="label-text">
-        {n.text}
-        {n.sub && <span className="label-sub">{n.sub}</span>}
-      </span>
-    </Html>
-  ))
+const LABEL_AT_B_FLIP_STYLE = { pointerEvents: 'none', transform: 'translate(calc(-100% - 18px), -100%)' }
+const EDGE_PX = 8
+
+// What straying costs, as the label at B says it: the minutes come from the same function as the panel card.
+function minutesMore(routes) {
+  const n = extraMinutes(routes)
+  return n === 0 ? 'under a minute more' : n === 1 ? '1 minute more' : `${n} minutes more`
+}
+
+function RouteNotes({ notes, routes, place }) {
+  const { camera, size, invalidate } = useThree()
+  const refs = useRef([])
+  const [flipped, setFlipped] = useState({})
+  const key = (n, i) => `${i}-${n.text}`
+  // Measure each label on every rendered frame: where would its right edge be, unflipped?
+  useFrame(() => {
+    let changed = false
+    const next = { ...flipped }
+    notes.forEach((n, i) => {
+      const el = refs.current[i]
+      if (!el || !el.offsetWidth) return
+      camera.updateMatrixWorld()
+      v.set(n.xy[0], 4, -n.xy[1]).project(camera)
+      const x = ((v.x + 1) / 2) * size.width
+      const right = x + (n.atB ? 18 : -3) + el.offsetWidth
+      const flip = right > size.width - EDGE_PX
+      if (!!next[key(n, i)] !== flip) {
+        next[key(n, i)] = flip
+        changed = true
+      }
+    })
+    if (changed) setFlipped(next)
+  })
+  // The label text is drawn a moment after the label appears: render once more to measure it.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => invalidate())
+    return () => cancelAnimationFrame(id)
+  }, [notes, routes, place, invalidate])
+  const { misrouted } = routes
+  return notes.map((n, i) => {
+    const flip = !!flipped[key(n, i)]
+    const atB = n.atB && !misrouted.sameAsShortest
+    return (
+      <Html
+        key={key(n, i)}
+        ref={(el) => (refs.current[i] = el)}
+        position={[n.xy[0], 4, -n.xy[1]]}
+        className={`route-label ${n.tone}${n.atB ? ' at-b' : ''}${flip ? ' flip' : ''}`}
+        calculatePosition={notePosition}
+        zIndexRange={[5, 0]}
+        style={n.atB ? (flip ? LABEL_AT_B_FLIP_STYLE : LABEL_AT_B_STYLE) : flip ? LABEL_FLIP_STYLE : LABEL_STYLE}
+      >
+        {!n.atB && <span className="label-dot" />}
+        {!n.atB && <span className="label-leader" />}
+        <span className="label-text">
+          {n.atB && place && <span className="label-place">{place}</span>}
+          {atB ? minutesMore(routes) : n.text}
+          {atB && misrouted.distance != null && (
+            <span className="label-sub small">{Math.round(misrouted.distance * 100)} % from yourself</span>
+          )}
+          {n.sub && <span className="label-sub">{n.sub}</span>}
+        </span>
+      </Html>
+    )
+  })
 }
 
 // "Play the day" as a density map: each played hour's misrouted walk is its own strand of footsteps,
@@ -325,26 +377,105 @@ function TraceHover({ traces }) {
 }
 
 // Once A and B are set, the camera glides in about a second to frame the whole walk, keeping its angle.
-// The panel on the left is left out of the frame. Orbiting or zooming stops the glide.
-const PANEL_PX = 352
+// It frames the walk in the free part of the screen: right of the panel, below the legend and above the
+// attribution line, with room for the pins, the label at B and the place names. Orbiting or zooming
+// stops the glide.
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2)
+
+// The part of the canvas not covered by the panel, the legend or the attribution line, in canvas pixels,
+// measured on the page. Without room to frame in (a narrow window), the whole canvas.
+function freeArea(canvas, size) {
+  const box = canvas.getBoundingClientRect()
+  const rect = (selector) => {
+    const el = document.querySelector(selector)
+    if (!el || getComputedStyle(el).display === 'none') return null
+    const r = el.getBoundingClientRect()
+    return r.width && r.height ? r : null
+  }
+  const panel = rect('.panel')
+  const legend = rect('.legend')
+  const attribution = rect('.attribution')
+  const whole = { left: 16, top: 16, right: size.width - 16, bottom: size.height - 16 }
+  const area = {
+    left: panel ? panel.right - box.left + 16 : whole.left,
+    top: legend ? legend.bottom - box.top + 8 : whole.top,
+    right: whole.right,
+    bottom: attribution ? attribution.top - box.top - 8 : whole.bottom,
+  }
+  return area.right - area.left < 200 || area.bottom - area.top < 150 ? whole : area
+}
+
+// Room on screen around A and B, in pixels left, up, right and down of their point: the pins, the place
+// name left of A, and the label at B (with its place name) right of and above B.
+const ROOM_A = [12, 45, 12, 0]
+const ROOM_A_PLACE = [160, 45, 12, 0]
+const ROOM_B = [12, 60, 200, 0]
+
 function FrameWalk({ frame }) {
-  const { camera, controls, invalidate, size } = useThree()
+  const { camera, controls, invalidate, size, gl } = useThree()
   useEffect(() => {
     if (!frame || !controls) return
     const [x0, y0, x1, y1] = frame.box
-    const centre = new THREE.Vector3((x0 + x1) / 2, 0, -(y0 + y1) / 2)
-    const panel = size.width > 700 ? PANEL_PX : 0
-    const aspect = (size.width - panel) / size.height
+    const area = freeArea(gl.domElement, size)
     const tan = Math.tan((camera.fov * Math.PI) / 360)
-    // Some room around the walk, also for the labels beside A and B.
-    const radius = Math.hypot(x1 - x0, y1 - y0) * 0.6 + 80
-    const distance = THREE.MathUtils.clamp(radius / (tan * Math.min(1, aspect)), controls.minDistance, controls.maxDistance)
     const direction = camera.position.clone().sub(controls.target).normalize()
-    // Move the view so the walk sits in the middle of the part of the screen not covered by the panel.
-    const right = new THREE.Vector3().crossVectors(direction, camera.up).normalize()
-    const shift = ((panel / 2) / size.width) * 2 * distance * tan * camera.aspect
-    const target = centre.clone().addScaledVector(right, shift)
+    const screenRight = new THREE.Vector3().crossVectors(camera.up, direction).normalize()
+    const forward = new THREE.Vector3(-direction.x, 0, -direction.z).normalize()
+    const lift = THREE.MathUtils.clamp(direction.y, 0.2, 1)
+    // What must lie in the free area: the corners of the walk's box, and A and B with their room.
+    const ground = (xy) => new THREE.Vector3(xy[0], 0, -xy[1])
+    const items = [
+      ...[[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map((xy) => ({ p: ground(xy), room: [0, 0, 0, 0] })),
+      { p: ground(frame.a), room: frame.placeA ? ROOM_A_PLACE : ROOM_A },
+      { p: ground(frame.b), room: ROOM_B },
+    ]
+    // A trial camera at the end position: where would everything land on screen?
+    const trial = camera.clone()
+    trial.aspect = size.width / size.height
+    trial.updateProjectionMatrix()
+    const measure = (target, distance) => {
+      trial.position.copy(target).addScaledVector(direction, distance)
+      trial.lookAt(target)
+      trial.updateMatrixWorld()
+      const walk = [Infinity, Infinity, -Infinity, -Infinity]
+      const all = [Infinity, Infinity, -Infinity, -Infinity]
+      for (const { p, room } of items) {
+        v.copy(p).project(trial)
+        const sx = ((v.x + 1) / 2) * size.width
+        const sy = ((1 - v.y) / 2) * size.height
+        walk[0] = Math.min(walk[0], sx)
+        walk[1] = Math.min(walk[1], sy)
+        walk[2] = Math.max(walk[2], sx)
+        walk[3] = Math.max(walk[3], sy)
+        all[0] = Math.min(all[0], sx - room[0])
+        all[1] = Math.min(all[1], sy - room[1])
+        all[2] = Math.max(all[2], sx + room[2])
+        all[3] = Math.max(all[3], sy + room[3])
+      }
+      return { walk, all }
+    }
+    // A first guess from the walk's size, then three passes: zoom until the walk and its room fit the free
+    // area (the room is in pixels, so it does not shrink with distance), then move the view so they sit
+    // in its middle.
+    const areaW = area.right - area.left
+    const areaH = area.bottom - area.top
+    const clamp = (d) => THREE.MathUtils.clamp(d, controls.minDistance, controls.maxDistance)
+    const radius = Math.hypot(x1 - x0, y1 - y0) * 0.6 + 80
+    let distance = clamp(radius / (tan * Math.min(1, areaW / areaH)))
+    const target = new THREE.Vector3((x0 + x1) / 2, 0, -(y0 + y1) / 2)
+    for (let pass = 0; pass < 3; pass++) {
+      const { walk, all } = measure(target, distance)
+      const walkW = walk[2] - walk[0]
+      const walkH = walk[3] - walk[1]
+      const fitW = Math.max(areaW * 0.3, (areaW - (all[2] - all[0] - walkW)) * 0.96)
+      const fitH = Math.max(areaH * 0.3, (areaH - (all[3] - all[1] - walkH)) * 0.96)
+      distance = clamp(distance * Math.max(walkW / fitW, walkH / fitH, 0.05))
+      const placed = measure(target, distance).all
+      const perPx = (2 * distance * tan) / size.height
+      const dx = (area.left + area.right) / 2 - (placed[0] + placed[2]) / 2
+      const dy = (area.top + area.bottom) / 2 - (placed[1] + placed[3]) / 2
+      target.addScaledVector(screenRight, -dx * perPx).addScaledVector(forward, (dy * perPx) / lift)
+    }
     const endPosition = target.clone().addScaledVector(direction, distance)
     const startPosition = camera.position.clone()
     const startTarget = controls.target.clone()
@@ -369,7 +500,7 @@ function FrameWalk({ frame }) {
   return null
 }
 
-export default function CityScene({ city, walk, onPick }) {
+export default function CityScene({ city, walk, places, onPick }) {
   const { x0, y0, x1, y1 } = city.bounds
   const shown = walk?.routes?.routes
   const near = useMemo(() => {
@@ -406,8 +537,14 @@ export default function CityScene({ city, walk, onPick }) {
     const pts = [shown.shortest, shown.expected, shown.misrouted].flatMap((r) => r.line)
     const xs = pts.map((p) => p[0])
     const ys = pts.map((p) => p[1])
-    return { id: `${start}|${end}`, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] }
-  }, [shown, start, end])
+    return {
+      id: `${start}|${end}`,
+      box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
+      a: start,
+      b: end,
+      placeA: !!places?.a,
+    }
+  }, [shown, start, end]) // eslint-disable-line react-hooks/exhaustive-deps
   const cx = (x0 + x1) / 2
   const cz = -(y0 + y1) / 2
   return (
@@ -427,8 +564,8 @@ export default function CityScene({ city, walk, onPick }) {
       {walk?.strands?.length > 0 && <Footsteps strands={walk.strands} />}
       {walk?.traces?.length > 0 && <TraceHover traces={walk.traces} />}
       {shown && <Routes city={city} routes={shown} unknown={unknown} />}
-      {walk?.routes?.notes && <RouteNotes notes={walk.routes.notes} />}
-      {walk?.a && <WalkPin xy={walk.routes?.start ?? walk.a} label="A" />}
+      {walk?.routes?.notes && <RouteNotes notes={walk.routes.notes} routes={shown} place={places?.b} />}
+      {walk?.a && <WalkPin xy={walk.routes?.start ?? walk.a} label="A" place={places?.a} />}
       {walk?.b && <WalkPin xy={walk.routes?.end ?? walk.b} label="B" />}
       <FrameWalk frame={frame} />
       <OrbitControls makeDefault target={[cx, 0, cz]} maxPolarAngle={Math.PI / 2.15} minDistance={60} maxDistance={6000} />

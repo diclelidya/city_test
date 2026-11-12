@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CityScene from './CityScene.jsx'
 import { prepareCity } from './cityGeometry.js'
+import { makeProjection } from './projection.js'
+import { extraMinutes } from './extraMinutes.js'
 import {
   USE_LABELS,
   ROUTE_COLORS,
@@ -23,8 +25,28 @@ const FILES = { kit: 'kit.json', buildings: 'buildings.geojson', graph: 'streets
 const ATTRIBUTION =
   'Buildings: 3D building models LoD2 © GDI-Th (dl-de/by-2-0). Land use and pedestrian network: Egor Gaydukov, InfAU, Bauhaus-Universität Weimar. Census grid: Zensus 2022, © Statistische Ämter des Bundes und der Länder (dl-de/by-2-0).'
 
-const INTRO =
-  'The city reads you by where you come from and where you go, and routes you along the streets it expects of you. This app shows that reading, then misroutes you and measures how far the walk takes you from yourself.'
+// The manifesto under the title, one paragraph per line. `light` lines are in the heading's tone.
+const MANIFESTO = [
+  { text: 'The city knows where you are going.' },
+  { text: 'It reads you by where you start and where you end, and leads you along the streets expected of you.' },
+  { text: 'Stray.', light: true, pause: true },
+  { text: 'This app shows the walk expected of you, then takes the one you would least take, hour by hour.' },
+  {
+    text: "The aim is not a better route: it is to make the city's quiet routing visible, and to measure how far you can stray from it.",
+    light: true,
+    aim: true,
+  },
+]
+
+// The walk the app opens with: from the Bauhaus-Universität main building (A, longitude and latitude) to
+// the street node about 90 m west of the Markt (B, in the app's metres), on a weekday at 12:00.
+const EXAMPLE_A_LONLAT = [11.32935, 50.97445]
+const EXAMPLE_B = [253, -314]
+const EXAMPLE_TIME = { day: 'weekday', hour: 12 }
+const EXAMPLE_PLACES = { a: 'Bauhaus-Universität', b: 'near the Markt' }
+// The panel line names the time actually shown, so it stays true when the hour or day is changed.
+const exampleText = (t) =>
+  `Example: from the Bauhaus-Universität to near the Markt, ${t.day} ${String(t.hour).padStart(2, '0')}:00. Click the map to set your own A, then B.`
 
 const fmt = (n) => n.toLocaleString('en-GB')
 
@@ -54,6 +76,9 @@ export default function App() {
   const [reading, setReading] = useState(false)
   // "Remember earlier hours": while playing the day, each hour avoids the streets earlier hours strayed along.
   const [memory, setMemory] = useState(false)
+  // The example walk is shown until the first click on the map.
+  const [example, setExample] = useState(true)
+  const exampleStarted = useRef(false)
   const changeMemory = (m) => {
     setMemory(m)
     if (play) setPlay(null) // the played day was computed with the other setting
@@ -100,6 +125,7 @@ export default function App() {
   const pick = useCallback(
     (xy) => {
       if (!ready) return
+      setExample(false) // the first click removes the example walk
       // First click: A. Second click: B, then the routes. A third click starts over.
       setPlay(null) // a new A or B clears the day and its traces
       if (!walk.a || walk.b) {
@@ -120,6 +146,23 @@ export default function App() {
     setBusy(true)
     worker.current.postMessage({ type: 'misroute', id: lastId.current, a, b, time: t })
   }
+
+  // Show the example walk: weekday 12:00, A at the Bauhaus-Universität, B near the Markt.
+  const showExample = () => {
+    const a = makeProjection(files.kit.center)(EXAMPLE_A_LONLAT)
+    setExample(true)
+    setTime(EXAMPLE_TIME)
+    setPlay(null)
+    setWalk({ a, b: EXAMPLE_B, result: null })
+    requestWalk(a, EXAMPLE_B, EXAMPLE_TIME)
+  }
+
+  // Once the street network is ready, open with the example walk (only once, and only if no walk is set).
+  useEffect(() => {
+    if (!ready || exampleStarted.current || walk.a) return
+    exampleStarted.current = true
+    showExample()
+  }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new time reads the same walk again. Moving the slider pauses playback; within a day already
   // computed the hour is taken from it. A new weekday or weekend clears the day and its traces.
@@ -199,7 +242,12 @@ export default function App() {
   return (
     <div className="app">
       {city ? (
-        <CityScene city={city} walk={{ a: walk.a, b: walk.b, routes, traces, strands, reading }} onPick={pick} />
+        <CityScene
+          city={city}
+          walk={{ a: walk.a, b: walk.b, routes, traces, strands, reading }}
+          places={example ? EXAMPLE_PLACES : null}
+          onPick={pick}
+        />
       ) : (
         <div className="loading">{error ? `The city kit didn't load (${error}).` : 'Loading the city…'}</div>
       )}
@@ -219,6 +267,8 @@ export default function App() {
           onMemory={changeMemory}
           reading={reading}
           onReading={setReading}
+          example={example}
+          onExample={showExample}
         />
       </aside>
 
@@ -239,7 +289,23 @@ const ROUTES = [
 const pct = (v) => `${Math.round(v * 100)} %`
 
 // "How far can you walk from yourself?": the profile the city reads, and three routes from A to B.
-function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, onPlay, reading, onReading, memory, onMemory }) {
+function MisroutePanel({
+  ready,
+  busy,
+  walk,
+  time,
+  onTime,
+  play,
+  traces,
+  ways,
+  onPlay,
+  reading,
+  onReading,
+  memory,
+  onMemory,
+  example,
+  onExample,
+}) {
   const r = walk.result
   const show = r?.routes && !busy
   let text
@@ -252,15 +318,25 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
     text = `No walkable street within 100 m of ${r.which}. Click again to start over, closer to a street.`
   else if (r?.error === 'same') text = 'A and B snap to the same street node. Click again to start over.'
   else if (r?.error) text = `Something went wrong: ${r.message}`
+  else if (example) text = exampleText(time)
   else text = `A and B snapped to the street nodes ${Math.round(r.snapA)} m and ${Math.round(r.snapB)} m from your clicks. Click again to start over.`
 
   const top = show && [...PROFILES].sort((x, y) => r.mix[y[0]] - r.mix[x[0]])[0]
   return (
     <>
       <h1>How far can you walk from yourself?</h1>
-      <p className="intro">{INTRO}</p>
+      {MANIFESTO.map(({ text, light, pause, aim }) => (
+        <p key={text} className={`intro${light ? ' light' : ''}${pause ? ' pause' : ''}${aim ? ' aim' : ''}`}>
+          {text}
+        </p>
+      ))}
       {show && <WalkStats routes={r.routes} />}
       <p className={`status${r?.error && !busy ? ' warn' : ''}`}>{text}</p>
+      {ready && !example && (
+        <button className="example-link" onClick={onExample}>
+          Show the example walk again
+        </button>
+      )}
       <TimeControl
         time={time}
         onTime={onTime}
@@ -375,6 +451,12 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
       <details className="method">
         <summary>How it works</summary>
         <p>
+          <strong>The example walk.</strong> The walk the app opens with, from the Bauhaus-Universität to near the
+          Markt, was chosen to be typical. Moving B about 90 m to the Markt itself makes the expected route the same
+          as the shortest route: the city's reading of a walk is fragile, and a few steps can change it. Click the map
+          to set your own A and B.
+        </p>
+        <p>
           <strong>How the profile is guessed.</strong> The app looks at the floor area per use of the buildings within
           100 m of A, and at the census cell of A (average age, rent). Flats point to local residents, and to older
           residents where the average age is high; education, a young average age and low rent point to students;
@@ -464,9 +546,9 @@ function MisroutePanel({ ready, busy, walk, time, onTime, play, traces, ways, on
 // The stat card at the top of the panel: how far the misrouted walk takes you from yourself, against the
 // expected route, and what straying costs in minutes over the shortest route.
 function WalkStats({ routes }) {
-  const { misrouted, expected, shortest } = routes
+  const { misrouted, expected } = routes
   const reading = (route) => (route.sameAsShortest ? 'same as shortest' : route.distance == null ? 'no reading' : pct(route.distance))
-  const extra = Math.round((misrouted.length - shortest.length) / 80)
+  const extra = extraMinutes(routes)
   return (
     <section className="stat-card">
       <div className="stat-title">Misrouted walk</div>
